@@ -33,6 +33,7 @@ export const CLIENT_REQUEST_TYPES = [
     'send.message',
     'connection.status.get',
     'qr.get',
+    'qr.refresh',
     'session.logout',
     'blocked.add',
     'blocked.remove',
@@ -48,6 +49,7 @@ export interface ClientRequestPayloads {
     'send.message': SendMessagePayload;
     'connection.status.get': undefined;
     'qr.get': undefined;
+    'qr.refresh': undefined;
     'session.logout': undefined;
     'blocked.add': BlockContactPayload;
     'blocked.remove': BlockContactPayload;
@@ -61,6 +63,7 @@ export interface ClientResponsePayloads {
     'send.message': StoredMessage;
     'connection.status.get': { status: ConnectionStatus };
     'qr.get': { qr: string | null };
+    'qr.refresh': { ok: true };
     'session.logout': { ok: true };
     'blocked.add': StoredBlockedContact | null;
     'blocked.remove': { ok: true };

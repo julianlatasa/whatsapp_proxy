@@ -178,6 +178,10 @@ export class WsServer {
             case 'qr.get':
                 return { qr: this.options.client.getLastQr() } as ClientResponsePayloads[T];
 
+            case 'qr.refresh':
+                await this.options.client.requestFreshQr();
+                return { ok: true } as ClientResponsePayloads[T];
+
             case 'session.logout':
                 await this.options.logout();
                 return { ok: true } as ClientResponsePayloads[T];

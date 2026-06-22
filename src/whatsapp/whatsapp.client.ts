@@ -77,6 +77,7 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
     private socket: WASocket | null = null;
     private status: ConnectionStatus = ConnectionStatus.IDLE;
     private reconnectDelayMs = 0;
+    private reconnectTimer: NodeJS.Timeout | null = null;
     private readonly pendingCallRejections = new Map<string, NodeJS.Timeout>();
     private lastQr: string | null = null;
 
@@ -112,6 +113,19 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
     async forceLogout(): Promise<void> {
         if (!this.socket) return;
         await this.socket.logout().catch(() => undefined);
+    }
+
+    /** Cancela el backoff de reconexión pendiente y reinicia el socket ya, para forzar un QR nuevo sin esperar. No hace nada si ya hay una sesión abierta. */
+    async requestFreshQr(): Promise<void> {
+        if (this.status === ConnectionStatus.OPEN) return;
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+        }
+        this.reconnectDelayMs = 0;
+        this.lastQr = null;
+        this.setStatus(ConnectionStatus.CONNECTING);
+        await this.initSocket();
     }
 
     private clearPendingCallRejections(): void {
@@ -188,7 +202,6 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
 
         if (qr) {
             this.lastQr = qr;
-            this.emit('qr', qr);
         }
 
         if (connection === 'close') {
@@ -205,6 +218,7 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
                 return;
             }
 
+            this.lastQr = null;
             this.setStatus(ConnectionStatus.RECONNECTING);
             this.scheduleReconnect();
             return;
@@ -332,7 +346,8 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
     private scheduleReconnect(): void {
         this.reconnectDelayMs = this.reconnectDelayMs ? Math.min(this.reconnectDelayMs * 2, RECONNECT_MAX_MS) : RECONNECT_BASE_MS;
 
-        setTimeout(() => {
+        this.reconnectTimer = setTimeout(() => {
+            this.reconnectTimer = null;
             void this.initSocket();
         }, this.reconnectDelayMs);
     }

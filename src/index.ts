@@ -1,12 +1,7 @@
-import qrcode from 'qrcode-terminal';
 import { WhatsAppProxyApp } from './app.js';
 import { config } from './config.js';
 
 const app = new WhatsAppProxyApp(config);
-
-app.client.on('qr', (qr) => {
-    qrcode.generate(qr, { small: true });
-});
 
 await app.start();
 
