@@ -15,7 +15,17 @@ import { rm } from 'node:fs/promises';
 import { TypedEventEmitter } from '../events/typed-emitter.js';
 import type { CreateMessageInput, MessageStatus } from '../types/message.types.js';
 import { isWithinRetentionWindow } from './message-freshness.js';
-import { MessageParser } from './message.parser.js';
+import { MessageParser, type UnsupportedTypeEvent } from './message.parser.js';
+
+function isUnsupportedTypeEvent(value: CreateMessageInput | UnsupportedTypeEvent): value is UnsupportedTypeEvent {
+    return (value as UnsupportedTypeEvent).kind === 'unsupported';
+}
+
+const UNSUPPORTED_TYPE_NOTICE =
+    '¡Hola! 😊 Recibí tu mensaje, pero todavía no puedo procesar ese tipo de contenido ' +
+    '(video, sticker, contacto, encuesta, documento, etc.). ' +
+    'Por ahora solo puedo leer *texto*, *imágenes* y *audios*. ' +
+    '¿Podrías reescribirlo de esa forma? ¡Gracias por tu paciencia! 🙏';
 
 export const ConnectionStatus = {
     IDLE: 'idle',
@@ -235,7 +245,7 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
         if (type !== 'notify' && type !== 'append') return;
 
         for (const waMessage of messages) {
-            this.processIncomingMessage(waMessage, { enforceRetentionWindow: true });
+            this.processIncomingMessage(waMessage, { enforceRetentionWindow: true, notifyUnsupported: true });
         }
     }
 
@@ -253,7 +263,7 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
 
     private onHistorySync({ messages, contacts }: BaileysEventMap['messaging-history.set']): void {
         for (const waMessage of messages) {
-            this.processIncomingMessage(waMessage, { enforceRetentionWindow: true });
+            this.processIncomingMessage(waMessage, { enforceRetentionWindow: true, notifyUnsupported: false });
         }
 
         for (const contact of contacts) {
@@ -262,7 +272,10 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
     }
 
     /** Procesa un WAMessage proveniente de `messages.upsert` o de history sync. */
-    private processIncomingMessage(waMessage: BaileysEventMap['messages.upsert']['messages'][number], options: { enforceRetentionWindow: boolean }): void {
+    private processIncomingMessage(
+        waMessage: BaileysEventMap['messages.upsert']['messages'][number],
+        options: { enforceRetentionWindow: boolean; notifyUnsupported: boolean }
+    ): void {
         const protocolEvent = this.parser.parseProtocolEvent(waMessage);
         if (protocolEvent) {
             if (protocolEvent.kind === 'delete') {
@@ -273,8 +286,15 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
             return;
         }
 
-        const parsed = waMessage.message ? this.parser.parse(waMessage) : this.parser.parseStub(waMessage);
+        const parsed = waMessage.message ? this.parser.parseWithUnsupported(waMessage) : this.parser.parseStub(waMessage);
         if (!parsed) return;
+
+        if (isUnsupportedTypeEvent(parsed)) {
+            if (options.notifyUnsupported) {
+                void this.notifyUnsupportedType(parsed.remoteJid);
+            }
+            return;
+        }
 
         if (options.enforceRetentionWindow && !isWithinRetentionWindow(parsed.messageTimestamp)) {
             return;
@@ -340,6 +360,15 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
             await this.sendText(call.from, CALL_REJECTION_NOTICE);
         } catch (error) {
             console.error(`[WhatsAppClient] No se pudo rechazar/avisar la llamada de ${call.from}:`, error);
+        }
+    }
+
+    /** Avisa amablemente al contacto que el tipo de mensaje que envió no está soportado. */
+    private async notifyUnsupportedType(remoteJid: string): Promise<void> {
+        try {
+            await this.sendText(remoteJid, UNSUPPORTED_TYPE_NOTICE);
+        } catch (error) {
+            console.error(`[WhatsAppClient] No se pudo avisar tipo de mensaje no soportado a ${remoteJid}:`, error);
         }
     }
 

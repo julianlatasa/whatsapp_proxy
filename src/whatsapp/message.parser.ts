@@ -23,6 +23,16 @@ export interface EditEvent {
 
 export type ProtocolEvent = DeleteEvent | EditEvent;
 
+/** Mensaje entrante 1-a-1 de un tipo que no se soporta (ver ALLOWED_INBOUND_TYPES). */
+export interface UnsupportedTypeEvent {
+    kind: 'unsupported';
+    remoteJid: string;
+}
+
+function isUnsupportedTypeEvent(value: CreateMessageInput | UnsupportedTypeEvent): value is UnsupportedTypeEvent {
+    return (value as UnsupportedTypeEvent).kind === 'unsupported';
+}
+
 const STUB_TYPE_LABELS: Partial<Record<proto.WebMessageInfo.StubType, string>> = {
     [proto.WebMessageInfo.StubType.GROUP_CREATE]: 'Grupo creado',
     [proto.WebMessageInfo.StubType.GROUP_CHANGE_SUBJECT]: 'Nombre del grupo cambiado',
@@ -39,6 +49,21 @@ const STUB_TYPE_LABELS: Partial<Record<proto.WebMessageInfo.StubType, string>> =
 export class MessageParser {
     /** Mensajes de contenido normal (texto, multimedia, interactivos, etc.). */
     parse(waMessage: WAMessage): CreateMessageInput | null {
+        const result = this.parseInternal(waMessage);
+        if (!result) return null;
+        return isUnsupportedTypeEvent(result) ? null : result;
+    }
+
+    /**
+     * Igual que `parse`, pero si el mensaje es de un chat 1-a-1 de un tipo no
+     * soportado, devuelve esa señal en vez de descartarlo silenciosamente
+     * (permite avisarle al contacto que el tipo de mensaje no es soportado).
+     */
+    parseWithUnsupported(waMessage: WAMessage): CreateMessageInput | UnsupportedTypeEvent | null {
+        return this.parseInternal(waMessage);
+    }
+
+    private parseInternal(waMessage: WAMessage): CreateMessageInput | UnsupportedTypeEvent | null {
         const { key, message, messageTimestamp, pushName } = waMessage;
         if (!message || !key.remoteJid || !key.id) return null;
         if (message.protocolMessage) return null;
@@ -53,7 +78,9 @@ export class MessageParser {
         // un tipo permitido; los salientes (fromMe) se guardan siempre.
         if (!fromMe) {
             if (isJidGroup(key.remoteJid)) return null;
-            if (!ALLOWED_INBOUND_TYPES.has(extracted.messageType)) return null;
+            if (!ALLOWED_INBOUND_TYPES.has(extracted.messageType)) {
+                return { kind: 'unsupported', remoteJid: key.remoteJid };
+            }
         }
 
         const timestamp = messageTimestamp ? Number(messageTimestamp) * 1_000 : Date.now();
