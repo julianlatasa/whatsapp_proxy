@@ -59,6 +59,14 @@ export class WsServer {
         options.persistenceObserver.on('message.persisted', (message) => {
             this.pushIncomingMessage(message);
         });
+
+        options.client.on('contact.lid-resolved', (mapping) => {
+            this.pushToActive({
+                type: 'contact.lid-resolved',
+                id: randomUUID(),
+                payload: { jid: mapping.pn, lid: mapping.lid },
+            });
+        });
     }
 
     close(): void {

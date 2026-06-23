@@ -10,12 +10,20 @@ export interface WsFrame<TPayload = unknown> {
     payload: TPayload;
 }
 
+export interface LidResolvedPayload {
+    /** Telefono real, formato "numero@s.whatsapp.net". */
+    jid: string;
+    /** Identificador estable (lid) que WhatsApp asocia a ese telefono. */
+    lid: string;
+}
+
 /** Frames que el servidor empuja sin que el cliente los haya pedido. */
 export type ServerPushFrame =
     | WsFrame<StoredMessage> // type: 'message.received' — entrante recién pusheado, esperando 'message.ack'
     | WsFrame<{ id: string; status: MessageStatus }> // type: 'message.status-changed' — saliente, informativo
     | WsFrame<{ status: ConnectionStatus }> // type: 'connection.status'
-    | WsFrame<{ qr: string }>; // type: 'qr.code'
+    | WsFrame<{ qr: string }> // type: 'qr.code'
+    | WsFrame<LidResolvedPayload>; // type: 'contact.lid-resolved' — WhatsApp resolvió el lid de un numero
 
 export interface BlockContactPayload {
     jid: string | null;
