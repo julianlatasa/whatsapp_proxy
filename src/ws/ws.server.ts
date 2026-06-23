@@ -150,11 +150,11 @@ export class WsServer {
         id: string,
         payload: ClientRequestPayloads[T]
     ): Promise<void> {
-        const result = await this.dispatch(type, payload);
+        const result = await this.dispatch(type, id, payload);
         this.send(socket, { type: `${type}.ok`, id, payload: result });
     }
 
-    private async dispatch<T extends ClientRequestType>(type: T, payload: ClientRequestPayloads[T]): Promise<ClientResponsePayloads[T]> {
+    private async dispatch<T extends ClientRequestType>(type: T, id: string, payload: ClientRequestPayloads[T]): Promise<ClientResponsePayloads[T]> {
         switch (type) {
             case 'message.ack': {
                 const { id } = payload as ClientRequestPayloads['message.ack'];
@@ -165,7 +165,7 @@ export class WsServer {
 
             case 'send.message': {
                 const { jid, text } = payload as ClientRequestPayloads['send.message'];
-                const draft = MessageFactory.createOutboundText(jid, text);
+                const draft = MessageFactory.createOutboundText(jid, text, id);
                 const waMessageId = await this.options.client.sendText(jid, text, draft.id);
                 const saved = this.options.messageRepository.save({ ...draft, id: waMessageId ?? draft.id });
                 if (!saved) throw new Error(`No se pudo persistir el mensaje enviado: ${draft.id}`);

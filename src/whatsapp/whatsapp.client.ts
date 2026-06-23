@@ -12,6 +12,7 @@ import makeWASocket, {
     type WASocket,
 } from '@whiskeysockets/baileys';
 import { rm } from 'node:fs/promises';
+import pino from 'pino';
 import { TypedEventEmitter } from '../events/typed-emitter.js';
 import type { CreateMessageInput, MessageStatus } from '../types/message.types.js';
 import { isWithinRetentionWindow } from './message-freshness.js';
@@ -59,6 +60,8 @@ export type WhatsAppClientEvents = {
     'contact.seen': (contact: SeenContact) => void;
     'contact.lid-resolved': (mapping: LIDMapping) => void;
 };
+
+const baileysLogger = pino({ level: process.env.BAILEYS_LOG_LEVEL ?? 'warn' });
 
 const RECONNECT_BASE_MS = 2_000;
 const RECONNECT_MAX_MS = 60_000;
@@ -196,6 +199,7 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
             browser: [this.browserName, 'Chrome', '1.0.0'],
             syncFullHistory: false,
             keepAliveIntervalMs: KEEP_ALIVE_INTERVAL_MS,
+            logger: baileysLogger,
         });
 
         this.socket.ev.on('creds.update', saveCreds);
@@ -332,6 +336,8 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
 
     private onCall(calls: WACallEvent[]): void {
         for (const call of calls) {
+            console.log(`[WhatsAppClient] Evento de llamada: id=${call.id} from=${call.from} status=${call.status}`);
+
             if (call.status === 'offer') {
                 const timer = setTimeout(() => {
                     this.pendingCallRejections.delete(call.id);
@@ -353,11 +359,16 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
     }
 
     private async rejectCall(call: WACallEvent): Promise<void> {
-        if (!this.socket) return;
+        if (!this.socket) {
+            console.warn(`[WhatsAppClient] No hay socket activo; no se puede rechazar la llamada de ${call.from}.`);
+            return;
+        }
 
         try {
             await this.socket.rejectCall(call.id, call.from);
+            console.log(`[WhatsAppClient] Llamada de ${call.from} rechazada.`);
             await this.sendText(call.from, CALL_REJECTION_NOTICE);
+            console.log(`[WhatsAppClient] Aviso de "solo mensajes" enviado a ${call.from}.`);
         } catch (error) {
             console.error(`[WhatsAppClient] No se pudo rechazar/avisar la llamada de ${call.from}:`, error);
         }

@@ -30,7 +30,10 @@ export class MessageRepository {
 
     /** Actualiza el estado de un mensaje (ack de envío/entrega). No retrocede si el id no existe. */
     updateStatus(id: string, status: MessageStatus, statusTimestamp: number = Date.now()): void {
-        this.db.update(messages).set({ status, statusTimestamp }).where(eq(messages.id, id)).run();
+        const result = this.db.update(messages).set({ status, statusTimestamp }).where(eq(messages.id, id)).run();
+        if (result.changes === 0) {
+            console.warn(`[MessageRepository] updateStatus no encontró mensaje con id=${id} (status=${status})`);
+        }
     }
 
     /** Mensajes entrantes que todavía no fueron confirmados (`acked`) por el WS, en orden de llegada. */
