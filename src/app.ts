@@ -5,7 +5,6 @@ import { MessageFactory } from './patterns/message.factory.js';
 import { BlockedContactRepository } from './storage/blocked-contact.repository.js';
 import { ContactRepository } from './storage/contact.repository.js';
 import { DatabaseConnection } from './storage/database.js';
-import { runJidAltBackfill } from './storage/jid-alt-backfill.js';
 import { MessageRepository } from './storage/message.repository.js';
 import type { StoredBlockedContact } from './types/blocked-contact.types.js';
 import type { ListMessagesOptions, StoredMessage } from './types/message.types.js';
@@ -59,7 +58,6 @@ export class WhatsAppProxyApp {
 
     static async create(options: WhatsAppProxyAppOptions): Promise<WhatsAppProxyApp> {
         const db = await DatabaseConnection.getInstance(options.dbPath);
-        await runJidAltBackfill(db);
 
         const repository = new MessageRepository(db);
         const blockedContacts = new BlockedContactRepository(db);

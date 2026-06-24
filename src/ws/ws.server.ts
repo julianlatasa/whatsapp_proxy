@@ -60,7 +60,7 @@ export class WsServer {
                 jidAlt = rawAck.key.participantAlt ?? rawAck.key.remoteJidAlt ?? null;
                 senderName = rawAck.update.pushName ?? null;
 
-                void this.options.messageRepository.ackOutbound(targetId, rawAck, jidAlt);
+                void this.options.messageRepository.ackOutbound(targetId, rawAck, jidAlt, rawAck.key.remoteJid ?? null);
                 void this.options.contactRepository.upsert({ jid: recipient.jid, lid: recipient.lid, pushName: senderName });
             }
 

@@ -45,12 +45,30 @@ export class MessageRepository {
     /**
      * Confirma en un solo UPDATE el ack de un mensaje saliente: pasa el `status`
      * a `acked`, guarda el raw de `{key, update}` del evento `messages.update`
-     * que lo disparó, y `remoteJidAlt` si se pudo resolver el formato alternativo.
+     * que lo disparó, y `remoteJidAlt` si se pudo resolver el formato alternativo
+     * (sin sobreescribir uno ya guardado; si tampoco vino, usa `remoteJid` del
+     * ack como respaldo).
      */
-    async ackOutbound(id: string, jsonAck: unknown, remoteJidAlt: string | null, statusTimestamp: number = Date.now()): Promise<void> {
-        const changes = { status: 'acked', statusTimestamp, jsonAck } as QueryDeepPartialEntity<MessageEntity>;
-        if (remoteJidAlt) changes.remoteJidAlt = remoteJidAlt;
-        const result = await this.repo.update(id, changes);
+    async ackOutbound(
+        id: string,
+        jsonAck: unknown,
+        remoteJidAlt: string | null,
+        remoteJidFallback: string | null,
+        statusTimestamp: number = Date.now()
+    ): Promise<void> {
+        const result = await this.repo
+            .createQueryBuilder()
+            .update(MessageEntity)
+            .set({
+                status: 'acked',
+                statusTimestamp,
+                jsonAck: jsonAck as QueryDeepPartialEntity<MessageEntity>['jsonAck'],
+                remoteJidAlt: () => `COALESCE(remote_jid_alt, :remoteJidAlt)`,
+            })
+            .where('id = :id', { id })
+            .setParameter('remoteJidAlt', remoteJidAlt ?? remoteJidFallback)
+            .execute();
+
         if (!result.affected) {
             console.warn(`[MessageRepository] ackOutbound no encontró mensaje con id=${id}`);
         } else {
