@@ -6,7 +6,7 @@ import type { BlockedContactRepository } from '../storage/blocked-contact.reposi
 import type { ContactRepository } from '../storage/contact.repository.js';
 import type { MessageRepository } from '../storage/message.repository.js';
 import type { StoredMessage } from '../types/message.types.js';
-import { ConnectionStatus, type WhatsAppClient } from '../whatsapp/whatsapp.client.js';
+import { ConnectionStatus, type RecipientIds, type WhatsAppClient } from '../whatsapp/whatsapp.client.js';
 import { AckTracker } from './ack-tracker.js';
 import {
     isClientRequestType,
@@ -61,7 +61,7 @@ export class WsServer {
                 senderName = rawAck.update.pushName ?? null;
 
                 void this.options.messageRepository.ackOutbound(targetId, rawAck, jidAlt, rawAck.key.remoteJid ?? null);
-                void this.options.contactRepository.upsert({ jid: recipient.jid, lid: recipient.lid, pushName: senderName });
+                void this.upsertAckedContact(recipient, senderName);
             }
 
             this.pushToActive({
@@ -81,6 +81,27 @@ export class WsServer {
                 id: randomUUID(),
                 payload: { jid: mapping.pn, lid: mapping.lid },
             });
+        });
+    }
+
+    /**
+     * El ack de un mensaje saliente puede traer solo uno de jid/lid (el otro
+     * vino null en `resolveSenderIds` porque Baileys no expuso el `*Alt` esa
+     * vez). Si el contacto ya existe con el id complementario guardado de
+     * antes, lo completamos ahí en vez de dejar que `upsert` cree una fila
+     * duplicada al no encontrar match por el id que falta.
+     */
+    private async upsertAckedContact(recipient: RecipientIds, pushName: string | null): Promise<void> {
+        const existing = recipient.jid
+            ? await this.options.contactRepository.findByJid(recipient.jid)
+            : recipient.lid
+              ? await this.options.contactRepository.findByLid(recipient.lid)
+              : null;
+
+        await this.options.contactRepository.upsert({
+            jid: recipient.jid ?? existing?.jid ?? null,
+            lid: recipient.lid ?? existing?.lid ?? null,
+            pushName,
         });
     }
 

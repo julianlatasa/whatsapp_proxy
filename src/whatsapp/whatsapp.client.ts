@@ -5,6 +5,7 @@ import makeWASocket, {
     DisconnectReason,
     isLidUser,
     isPnUser,
+    jidNormalizedUser,
     type LIDMapping,
     proto,
     useMultiFileAuthState,
@@ -215,7 +216,9 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
         this.socket.ev.on('messages.update', (updates) => this.onMessagesUpdate(updates));
         this.socket.ev.on('messaging-history.set', (history) => this.onHistorySync(history));
         this.socket.ev.on('call', (calls) => this.onCall(calls));
-        this.socket.ev.on('lid-mapping.update', (mapping) => this.emit('contact.lid-resolved', mapping));
+        this.socket.ev.on('lid-mapping.update', (mapping) =>
+            this.emit('contact.lid-resolved', { pn: jidNormalizedUser(mapping.pn), lid: jidNormalizedUser(mapping.lid) })
+        );
     }
 
     private onConnectionUpdate(update: BaileysEventMap['connection.update']): void {
@@ -337,13 +340,17 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
         const jid = candidates.find((id) => isPnUser(id)) ?? null;
         const lid = candidates.find((id) => isLidUser(id)) ?? null;
 
-        return { jid, lid };
+        return { jid: jid ? jidNormalizedUser(jid) : null, lid: lid ? jidNormalizedUser(lid) : null };
     }
 
     private emitContactSeen(contact: Contact): void {
         const jid = contact.phoneNumber ?? contact.id;
         if (!jid) return;
-        this.emit('contact.seen', { jid, lid: contact.lid ?? null, pushName: contact.notify ?? contact.name ?? null });
+        this.emit('contact.seen', {
+            jid: jidNormalizedUser(jid),
+            lid: contact.lid ? jidNormalizedUser(contact.lid) : null,
+            pushName: contact.notify ?? contact.name ?? null,
+        });
     }
 
     private onCall(calls: WACallEvent[]): void {
