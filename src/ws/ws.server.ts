@@ -194,7 +194,12 @@ export class WsServer {
 
                 const sent = await this.options.client.sendText(jid, text, draft.id);
                 const finalId = sent?.key?.id ?? draft.id;
+                console.log(`[ws.server] Mensaje enviado: draft.id=${draft.id} sent.key.id=${sent?.key?.id ?? '(sin respuesta)'} -> finalId=${finalId}`);
+                if (finalId !== draft.id) {
+                    console.warn(`[ws.server] WhatsApp devolvió un id distinto al forzado: draft=${draft.id} final=${finalId}`);
+                }
                 this.options.messageRepository.markSent(draft.id, finalId, sent ?? null);
+                console.log(`[ws.server] Mensaje persistido en DB con id=${finalId} (status=sent).`);
 
                 const saved = this.options.messageRepository.findById(finalId);
                 if (!saved) throw new Error(`No se pudo persistir el mensaje enviado: ${draft.id}`);

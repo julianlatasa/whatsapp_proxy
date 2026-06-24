@@ -33,6 +33,8 @@ export class MessageRepository {
         const result = this.db.update(messages).set({ status, statusTimestamp }).where(eq(messages.id, id)).run();
         if (result.changes === 0) {
             console.warn(`[MessageRepository] updateStatus no encontró mensaje con id=${id} (status=${status})`);
+        } else {
+            console.log(`[MessageRepository] Mensaje id=${id} actualizado a status=${status}.`);
         }
     }
 

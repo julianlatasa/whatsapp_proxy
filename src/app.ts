@@ -81,7 +81,12 @@ export class WhatsAppProxyApp {
 
         const sent = await this.client.sendText(jid, text, draft.id);
         const finalId = sent?.key?.id ?? draft.id;
+        console.log(`[app] Mensaje enviado: draft.id=${draft.id} sent.key.id=${sent?.key?.id ?? '(sin respuesta)'} -> finalId=${finalId}`);
+        if (finalId !== draft.id) {
+            console.warn(`[app] WhatsApp devolvió un id distinto al forzado: draft=${draft.id} final=${finalId}`);
+        }
         this.repository.markSent(draft.id, finalId, sent ?? null);
+        console.log(`[app] Mensaje persistido en DB con id=${finalId} (status=sent).`);
 
         const saved = this.repository.findById(finalId);
         if (!saved) {

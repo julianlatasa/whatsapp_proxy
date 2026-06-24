@@ -266,9 +266,13 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
             const { key, update } = entry;
             if (!key.id || update.status == null) continue;
 
+            console.log(`[WhatsAppClient] ACK recibido: key.id=${key.id} status=${update.status}`);
+
             const mappedStatus = ACK_STATUS_MAP[update.status];
             if (mappedStatus) {
                 this.emit('message.status-changed', key.id, mappedStatus, this.resolveSenderIds(key), entry);
+            } else {
+                console.log(`[WhatsAppClient] ACK con status=${update.status} no mapeado, se ignora (key.id=${key.id}).`);
             }
         }
     }
