@@ -11,7 +11,8 @@
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "db:push": "drizzle-kit push",
-    "backfill:jid-alt": "npm run build && node scripts/backfill-jid-alt.mjs"
+    "backfill:jid-alt": "npm run build && node scripts/backfill-jid-alt.mjs",
+    "db:backup": "node scripts/backup.mjs"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc13",

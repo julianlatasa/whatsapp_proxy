@@ -29,6 +29,7 @@ export class DatabaseConnection {
         if (!DatabaseConnection.instance) {
             const sqlite = new Database(dbPath);
             sqlite.pragma('journal_mode = WAL');
+            sqlite.pragma('wal_autocheckpoint = 100');
 
             const db = drizzle(sqlite, { schema });
             console.log(`[database] Aplicando migraciones desde ${MIGRATIONS_FOLDER}...`);
