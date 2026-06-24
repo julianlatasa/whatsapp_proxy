@@ -1,50 +1,57 @@
-import Database from 'better-sqlite3';
-import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
-import { fileURLToPath } from 'node:url';
+import 'reflect-metadata';
+import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import * as schema from './schema.js';
+import { fileURLToPath } from 'node:url';
+import { DataSource } from 'typeorm';
+import { BlockedContactEntity } from './entities/blocked-contact.entity.js';
+import { ContactEntity } from './entities/contact.entity.js';
+import { MessageEntity } from './entities/message.entity.js';
 
-export type AppDatabase = BetterSQLite3Database<typeof schema>;
+export type AppDatabase = DataSource;
 
-const MIGRATIONS_FOLDER = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'drizzle');
+const MIGRATIONS_FOLDER = join(dirname(fileURLToPath(import.meta.url)), 'migrations');
 
 /**
- * Patrón Singleton: la conexión SQLite (envuelta en Drizzle) se abre una
+ * Patrón Singleton: la conexión SQLite (envuelta en TypeORM) se abre una
  * sola vez por proceso. Repositorios y otros consumidores piden la
  * instancia vía `getInstance` en lugar de construir su propia conexión.
  *
- * El esquema de tablas se mantiene en `storage/schema.ts`; los archivos SQL
- * de migración (generados con `npx drizzle-kit generate`) viven en
- * `./drizzle` y se aplican automáticamente acá para que un volumen nuevo
- * (p. ej. en Northflank) quede con las tablas creadas sin pasos manuales.
+ * Las entidades viven en `storage/entities/*.entity.ts`; las migraciones
+ * (generadas con `npm run migration:generate`) viven en `./migrations` y se
+ * aplican automáticamente acá para que un volumen nuevo (p. ej. en
+ * Northflank) quede con las tablas creadas sin pasos manuales.
  */
 export class DatabaseConnection {
-    private static instance: AppDatabase | null = null;
-    private static sqlite: Database.Database | null = null;
+    private static instance: DataSource | null = null;
 
     private constructor() {}
 
-    static getInstance(dbPath: string): AppDatabase {
+    static async getInstance(dbPath: string): Promise<DataSource> {
         if (!DatabaseConnection.instance) {
-            const sqlite = new Database(dbPath);
-            sqlite.pragma('journal_mode = WAL');
-            sqlite.pragma('wal_autocheckpoint = 100');
+            mkdirSync(dirname(dbPath), { recursive: true });
 
-            const db = drizzle(sqlite, { schema });
+            const dataSource = new DataSource({
+                type: 'better-sqlite3',
+                database: dbPath,
+                entities: [MessageEntity, ContactEntity, BlockedContactEntity],
+                migrations: [join(MIGRATIONS_FOLDER, '*.js')],
+            });
+
+            await dataSource.initialize();
+            await dataSource.query('PRAGMA journal_mode = WAL');
+            await dataSource.query('PRAGMA wal_autocheckpoint = 100');
+
             console.log(`[database] Aplicando migraciones desde ${MIGRATIONS_FOLDER}...`);
-            migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+            await dataSource.runMigrations();
             console.log('[database] Migraciones aplicadas.');
 
-            DatabaseConnection.sqlite = sqlite;
-            DatabaseConnection.instance = db;
+            DatabaseConnection.instance = dataSource;
         }
         return DatabaseConnection.instance;
     }
 
-    static close(): void {
-        DatabaseConnection.sqlite?.close();
-        DatabaseConnection.sqlite = null;
+    static async close(): Promise<void> {
+        await DatabaseConnection.instance?.destroy();
         DatabaseConnection.instance = null;
     }
 }

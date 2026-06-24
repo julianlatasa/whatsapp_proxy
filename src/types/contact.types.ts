@@ -1,7 +1,6 @@
-import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
-import type { contacts } from '../storage/schema.js';
+import type { ContactEntity } from '../storage/entities/contact.entity.js';
 
-/** Derivado 1:1 de las columnas de `contacts` (ver `storage/schema.ts`). */
-export type StoredContact = InferSelectModel<typeof contacts>;
+/** Derivado 1:1 de las columnas de `contacts` (ver `storage/entities/contact.entity.ts`). */
+export type StoredContact = ContactEntity;
 
-export type RegisterContactInput = Omit<InferInsertModel<typeof contacts>, 'id' | 'firstSeenAt'>;
+export type RegisterContactInput = Omit<ContactEntity, 'id' | 'firstSeenAt'>;

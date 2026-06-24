@@ -1,7 +1,8 @@
+import 'reflect-metadata';
 import { WhatsAppProxyApp } from './app.js';
 import { config } from './config.js';
 
-const app = new WhatsAppProxyApp(config);
+const app = await WhatsAppProxyApp.create(config);
 
 await app.start();
 

@@ -5,11 +5,11 @@ import type { WhatsAppClient } from '../whatsapp/whatsapp.client.js';
 export class ContactRegistryObserver {
     constructor(client: WhatsAppClient, private readonly repository: ContactRepository) {
         client.on('contact.seen', (contact) => {
-            this.repository.upsert(contact);
+            void this.repository.upsert(contact);
         });
 
         client.on('contact.lid-resolved', (mapping) => {
-            this.repository.updateLid(mapping.pn, mapping.lid);
+            void this.repository.updateLid(mapping.pn, mapping.lid);
         });
     }
 }

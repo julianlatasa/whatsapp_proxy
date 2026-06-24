@@ -1,5 +1,4 @@
-import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
-import type { MESSAGE_STATUSES, MESSAGE_TYPES, messages } from '../storage/schema.js';
+import { MESSAGE_STATUSES, MESSAGE_TYPES, MessageEntity } from '../storage/entities/message.entity.js';
 
 export type MessageType = (typeof MESSAGE_TYPES)[number];
 
@@ -19,10 +18,11 @@ export interface MessageKey {
  */
 export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
 
-/** Derivado 1:1 de las columnas de `messages` (ver `storage/schema.ts`). */
-export type StoredMessage = InferSelectModel<typeof messages>;
+/** Derivado 1:1 de las columnas de `messages` (ver `storage/entities/message.entity.ts`). */
+export type StoredMessage = MessageEntity;
 
-export type CreateMessageInput = Omit<InferInsertModel<typeof messages>, 'createdAt'>;
+export type CreateMessageInput = Omit<MessageEntity, 'createdAt' | 'remoteJidAlt' | 'jsonAck'> &
+    Partial<Pick<MessageEntity, 'remoteJidAlt' | 'jsonAck'>>;
 
 export interface ListMessagesOptions {
     remoteJid?: string;

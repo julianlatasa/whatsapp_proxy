@@ -1,45 +1,49 @@
-import { eq, or } from 'drizzle-orm';
-import type { AppDatabase } from './database.js';
-import { blockedContacts } from './schema.js';
+import type { DataSource, Repository } from 'typeorm';
+import { BlockedContactEntity } from './entities/blocked-contact.entity.js';
 import type { BlockContactInput, StoredBlockedContact } from '../types/blocked-contact.types.js';
 
-/** Patrón Repository: aísla el acceso a `blocked_contacts` vía Drizzle. */
+/** Patrón Repository: aísla el acceso a `blocked_contacts` vía TypeORM. */
 export class BlockedContactRepository {
-    constructor(private readonly db: AppDatabase) {}
+    private readonly repo: Repository<BlockedContactEntity>;
+
+    constructor(db: DataSource) {
+        this.repo = db.getRepository(BlockedContactEntity);
+    }
 
     /** Bloquea un contacto por jid y/o lid. No-op si ya hay un bloqueo para alguno de los dos. */
-    block(input: BlockContactInput): StoredBlockedContact | null {
+    async block(input: BlockContactInput): Promise<StoredBlockedContact | null> {
         const jid = input.jid ?? null;
         const lid = input.lid ?? null;
         if (!jid && !lid) return null;
-        if (this.isBlocked(jid, lid)) return null;
+        if (await this.isBlocked(jid, lid)) return null;
 
-        const result = this.db.insert(blockedContacts).values(input).run();
-        return this.db.select().from(blockedContacts).where(eq(blockedContacts.id, Number(result.lastInsertRowid))).get() ?? null;
+        const inserted = await this.repo.insert({ jid, lid });
+        const id = Number(inserted.identifiers[0]?.id);
+        return this.repo.findOne({ where: { id } });
     }
 
     /** Elimina cualquier bloqueo que coincida con el jid o el lid dados. */
-    unblock(jid: string | null, lid: string | null): void {
-        const conditions = [jid ? eq(blockedContacts.jid, jid) : undefined, lid ? eq(blockedContacts.lid, lid) : undefined].filter(
+    async unblock(jid: string | null, lid: string | null): Promise<void> {
+        const conditions = [jid ? { jid } : undefined, lid ? { lid } : undefined].filter(
             (c): c is NonNullable<typeof c> => c !== undefined
         );
         if (conditions.length === 0) return;
 
-        this.db.delete(blockedContacts).where(or(...conditions)).run();
+        await this.repo.delete(conditions);
     }
 
     /** True si el jid o el lid dados coinciden con algún contacto bloqueado. */
-    isBlocked(jid: string | null, lid: string | null): boolean {
-        const conditions = [jid ? eq(blockedContacts.jid, jid) : undefined, lid ? eq(blockedContacts.lid, lid) : undefined].filter(
+    async isBlocked(jid: string | null, lid: string | null): Promise<boolean> {
+        const conditions = [jid ? { jid } : undefined, lid ? { lid } : undefined].filter(
             (c): c is NonNullable<typeof c> => c !== undefined
         );
         if (conditions.length === 0) return false;
 
-        const row = this.db.select().from(blockedContacts).where(or(...conditions)).get();
+        const row = await this.repo.findOne({ where: conditions });
         return row != null;
     }
 
-    list(): StoredBlockedContact[] {
-        return this.db.select().from(blockedContacts).all();
+    async list(): Promise<StoredBlockedContact[]> {
+        return this.repo.find();
     }
 }

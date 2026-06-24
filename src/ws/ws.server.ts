@@ -60,8 +60,8 @@ export class WsServer {
                 jidAlt = rawAck.key.participantAlt ?? rawAck.key.remoteJidAlt ?? null;
                 senderName = rawAck.update.pushName ?? null;
 
-                this.options.messageRepository.ackOutbound(targetId, rawAck, jidAlt);
-                this.options.contactRepository.upsert({ jid: recipient.jid, lid: recipient.lid, pushName: senderName });
+                void this.options.messageRepository.ackOutbound(targetId, rawAck, jidAlt);
+                void this.options.contactRepository.upsert({ jid: recipient.jid, lid: recipient.lid, pushName: senderName });
             }
 
             this.pushToActive({
@@ -98,7 +98,7 @@ export class WsServer {
         socket.on('message', (data) => this.onMessage(socket, data));
         socket.on('close', () => this.onClose(socket));
 
-        this.sendInitialState(socket);
+        void this.sendInitialState(socket);
     }
 
     private onClose(socket: WebSocket): void {
@@ -111,11 +111,11 @@ export class WsServer {
     private releaseInFlightMessages(): void {
         const ids = this.ackTracker.cancelAll();
         for (const id of ids) {
-            this.options.messageRepository.markPending(id);
+            void this.options.messageRepository.markPending(id);
         }
     }
 
-    private sendInitialState(socket: WebSocket): void {
+    private async sendInitialState(socket: WebSocket): Promise<void> {
         const status = this.options.client.getStatus();
         this.send(socket, { type: 'connection.status', id: randomUUID(), payload: { status } });
 
@@ -126,20 +126,20 @@ export class WsServer {
             }
         }
 
-        for (const message of this.options.messageRepository.listUnacked()) {
+        for (const message of await this.options.messageRepository.listUnacked()) {
             this.pushIncomingMessage(message);
         }
     }
 
     private pushIncomingMessage(message: StoredMessage): void {
         this.ackTracker.track(message.id, () => {
-            this.options.messageRepository.markPushed(message.id);
+            void this.options.messageRepository.markPushed(message.id);
             this.pushToActive({ type: 'message.received', id: message.id, payload: message });
         });
     }
 
     private handlePushGiveUp(messageId: string): void {
-        this.options.messageRepository.markPending(messageId);
+        void this.options.messageRepository.markPending(messageId);
     }
 
     private pushToActive(frame: ServerPushFrame): void {
@@ -182,14 +182,14 @@ export class WsServer {
             case 'message.ack': {
                 const { id } = payload as ClientRequestPayloads['message.ack'];
                 this.ackTracker.ack(id);
-                this.options.messageRepository.markAcked(id);
+                await this.options.messageRepository.markAcked(id);
                 return { ok: true } as ClientResponsePayloads[T];
             }
 
             case 'send.message': {
                 const { jid, text } = payload as ClientRequestPayloads['send.message'];
                 const draft = MessageFactory.createOutboundText(jid, text, id);
-                this.options.messageRepository.save(draft);
+                await this.options.messageRepository.save(draft);
 
                 const sent = await this.options.client.sendText(jid, text, draft.id);
                 const finalId = sent?.key?.id ?? draft.id;
@@ -197,10 +197,10 @@ export class WsServer {
                 if (finalId !== draft.id) {
                     console.warn(`[ws.server] WhatsApp devolvió un id distinto al forzado: draft=${draft.id} final=${finalId}`);
                 }
-                this.options.messageRepository.markSent(draft.id, finalId, sent ?? null);
+                await this.options.messageRepository.markSent(draft.id, finalId, sent ?? null);
                 console.log(`[ws.server] Mensaje persistido en DB con id=${finalId} (status=sent).`);
 
-                const saved = this.options.messageRepository.findById(finalId);
+                const saved = await this.options.messageRepository.findById(finalId);
                 if (!saved) throw new Error(`No se pudo persistir el mensaje enviado: ${draft.id}`);
                 return saved as ClientResponsePayloads[T];
             }
@@ -221,26 +221,26 @@ export class WsServer {
 
             case 'blocked.add': {
                 const { jid, lid } = payload as ClientRequestPayloads['blocked.add'];
-                return this.options.blockedContactRepository.block({ jid, lid }) as ClientResponsePayloads[T];
+                return (await this.options.blockedContactRepository.block({ jid, lid })) as ClientResponsePayloads[T];
             }
 
             case 'blocked.remove': {
                 const { jid, lid } = payload as ClientRequestPayloads['blocked.remove'];
-                this.options.blockedContactRepository.unblock(jid, lid);
+                await this.options.blockedContactRepository.unblock(jid, lid);
                 return { ok: true } as ClientResponsePayloads[T];
             }
 
             case 'blocked.list':
-                return this.options.blockedContactRepository.list() as ClientResponsePayloads[T];
+                return (await this.options.blockedContactRepository.list()) as ClientResponsePayloads[T];
 
             case 'contact.lookup-by-jid': {
                 const { jid } = payload as ClientRequestPayloads['contact.lookup-by-jid'];
-                return this.options.contactRepository.findByJid(jid) as ClientResponsePayloads[T];
+                return (await this.options.contactRepository.findByJid(jid)) as ClientResponsePayloads[T];
             }
 
             case 'contact.lookup-by-lid': {
                 const { lid } = payload as ClientRequestPayloads['contact.lookup-by-lid'];
-                return this.options.contactRepository.findByLid(lid) as ClientResponsePayloads[T];
+                return (await this.options.contactRepository.findByLid(lid)) as ClientResponsePayloads[T];
             }
 
             default:

@@ -1,25 +1,28 @@
-import { and, eq, isNull, or } from 'drizzle-orm';
-import type { AppDatabase } from './database.js';
-import { contacts } from './schema.js';
+import { IsNull, type DataSource, type Repository } from 'typeorm';
+import { ContactEntity } from './entities/contact.entity.js';
 import type { RegisterContactInput, StoredContact } from '../types/contact.types.js';
 
-/** Patrón Repository: aísla el acceso a `contacts` vía Drizzle. */
+/** Patrón Repository: aísla el acceso a `contacts` vía TypeORM. */
 export class ContactRepository {
-    constructor(private readonly db: AppDatabase) {}
+    private readonly repo: Repository<ContactEntity>;
+
+    constructor(db: DataSource) {
+        this.repo = db.getRepository(ContactEntity);
+    }
 
     /**
      * Registra el contacto si no existía (buscando por jid o por lid). Si ya
      * existía, completa el jid/lid que faltara y actualiza el pushName si
      * cambió. Devuelve la fila resultante, o null si no había jid ni lid.
      */
-    upsert(input: RegisterContactInput): StoredContact | null {
+    async upsert(input: RegisterContactInput): Promise<StoredContact | null> {
         const jid = input.jid ?? null;
         const lid = input.lid ?? null;
         if (!jid && !lid) return null;
 
-        const existing = this.findByJidOrLid(jid, lid);
+        const existing = await this.findByJidOrLid(jid, lid);
         if (!existing) {
-            this.db.insert(contacts).values(input).run();
+            await this.repo.insert({ jid, lid, pushName: input.pushName });
             return this.findByJidOrLid(jid, lid);
         }
 
@@ -29,7 +32,7 @@ export class ContactRepository {
         if (input.pushName && input.pushName !== existing.pushName) changes.pushName = input.pushName;
 
         if (Object.keys(changes).length > 0) {
-            this.db.update(contacts).set(changes).where(eq(contacts.id, existing.id)).run();
+            await this.repo.update(existing.id, changes);
             return this.findByJidOrLid(jid, lid);
         }
 
@@ -37,31 +40,24 @@ export class ContactRepository {
     }
 
     /** Completa el lid de un contacto ya registrado, sin sobreescribir uno existente. */
-    updateLid(jid: string, lid: string): void {
-        this.db
-            .update(contacts)
-            .set({ lid })
-            .where(and(eq(contacts.jid, jid), isNull(contacts.lid)))
-            .run();
+    async updateLid(jid: string, lid: string): Promise<void> {
+        await this.repo.update({ jid, lid: IsNull() }, { lid });
     }
 
-    findByJid(jid: string): StoredContact | null {
-        const row = this.db.select().from(contacts).where(eq(contacts.jid, jid)).get();
-        return row ?? null;
+    async findByJid(jid: string): Promise<StoredContact | null> {
+        return this.repo.findOne({ where: { jid } });
     }
 
-    findByLid(lid: string): StoredContact | null {
-        const row = this.db.select().from(contacts).where(eq(contacts.lid, lid)).get();
-        return row ?? null;
+    async findByLid(lid: string): Promise<StoredContact | null> {
+        return this.repo.findOne({ where: { lid } });
     }
 
-    private findByJidOrLid(jid: string | null, lid: string | null): StoredContact | null {
-        const conditions = [jid ? eq(contacts.jid, jid) : undefined, lid ? eq(contacts.lid, lid) : undefined].filter(
+    private async findByJidOrLid(jid: string | null, lid: string | null): Promise<StoredContact | null> {
+        const conditions = [jid ? { jid } : undefined, lid ? { lid } : undefined].filter(
             (c): c is NonNullable<typeof c> => c !== undefined
         );
         if (conditions.length === 0) return null;
 
-        const row = this.db.select().from(contacts).where(or(...conditions)).get();
-        return row ?? null;
+        return this.repo.findOne({ where: conditions });
     }
 }

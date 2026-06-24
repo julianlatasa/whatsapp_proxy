@@ -1,5 +1,3 @@
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { ConsoleLoggerObserver } from './observers/console-logger.observer.js';
 import { ContactRegistryObserver } from './observers/contact-registry.observer.js';
 import { PersistenceObserver } from './observers/persistence.observer.js';
@@ -33,23 +31,23 @@ export class WhatsAppProxyApp {
     private readonly blockedContacts: BlockedContactRepository;
     private readonly wsServer: WsServer;
 
-    constructor(options: WhatsAppProxyAppOptions) {
-        mkdirSync(dirname(options.dbPath), { recursive: true });
-
-        const db = DatabaseConnection.getInstance(options.dbPath);
-        runJidAltBackfill(db);
-
-        this.repository = new MessageRepository(db);
-        this.blockedContacts = new BlockedContactRepository(db);
-        const contactRepository = new ContactRepository(db);
-        this.client = new WhatsAppClient({ authDir: options.authDir, browserName: options.browserName });
+    private constructor(
+        client: WhatsAppClient,
+        repository: MessageRepository,
+        blockedContacts: BlockedContactRepository,
+        contactRepository: ContactRepository,
+        wsPort: number
+    ) {
+        this.client = client;
+        this.repository = repository;
+        this.blockedContacts = blockedContacts;
 
         new ConsoleLoggerObserver(this.client);
         const persistenceObserver = new PersistenceObserver(this.client, this.repository, this.blockedContacts);
         new ContactRegistryObserver(this.client, contactRepository);
 
         this.wsServer = new WsServer({
-            port: options.wsPort,
+            port: wsPort,
             client: this.client,
             messageRepository: this.repository,
             contactRepository,
@@ -59,6 +57,18 @@ export class WhatsAppProxyApp {
         });
     }
 
+    static async create(options: WhatsAppProxyAppOptions): Promise<WhatsAppProxyApp> {
+        const db = await DatabaseConnection.getInstance(options.dbPath);
+        await runJidAltBackfill(db);
+
+        const repository = new MessageRepository(db);
+        const blockedContacts = new BlockedContactRepository(db);
+        const contactRepository = new ContactRepository(db);
+        const client = new WhatsAppClient({ authDir: options.authDir, browserName: options.browserName });
+
+        return new WhatsAppProxyApp(client, repository, blockedContacts, contactRepository, options.wsPort);
+    }
+
     async start(): Promise<void> {
         await this.client.connect();
     }
@@ -66,7 +76,7 @@ export class WhatsAppProxyApp {
     async stop(): Promise<void> {
         this.wsServer.close();
         await this.client.disconnect();
-        DatabaseConnection.close();
+        await DatabaseConnection.close();
     }
 
     /** Cierra la sesión de WhatsApp y limpia las credenciales guardadas; al reconectar se pedirá un QR nuevo. */
@@ -77,7 +87,7 @@ export class WhatsAppProxyApp {
     /** Envía un mensaje de texto y lo persiste como saliente (`fromMe: true`). */
     async sendMessage(jid: string, text: string): Promise<StoredMessage> {
         const draft = MessageFactory.createOutboundText(jid, text);
-        this.repository.save(draft);
+        await this.repository.save(draft);
 
         const sent = await this.client.sendText(jid, text, draft.id);
         const finalId = sent?.key?.id ?? draft.id;
@@ -85,10 +95,10 @@ export class WhatsAppProxyApp {
         if (finalId !== draft.id) {
             console.warn(`[app] WhatsApp devolvió un id distinto al forzado: draft=${draft.id} final=${finalId}`);
         }
-        this.repository.markSent(draft.id, finalId, sent ?? null);
+        await this.repository.markSent(draft.id, finalId, sent ?? null);
         console.log(`[app] Mensaje persistido en DB con id=${finalId} (status=sent).`);
 
-        const saved = this.repository.findById(finalId);
+        const saved = await this.repository.findById(finalId);
         if (!saved) {
             throw new Error(`No se pudo persistir el mensaje enviado: ${draft.id}`);
         }
@@ -96,20 +106,20 @@ export class WhatsAppProxyApp {
         return saved;
     }
 
-    getMessages(options: ListMessagesOptions = {}): StoredMessage[] {
+    async getMessages(options: ListMessagesOptions = {}): Promise<StoredMessage[]> {
         return this.repository.list(options);
     }
 
     /** Bloquea un contacto por jid (s.whatsapp.net) y/o lid. Los mensajes que llegue de él se descartan. */
-    blockContact(jid: string | null, lid: string | null): StoredBlockedContact | null {
+    async blockContact(jid: string | null, lid: string | null): Promise<StoredBlockedContact | null> {
         return this.blockedContacts.block({ jid, lid });
     }
 
-    unblockContact(jid: string | null, lid: string | null): void {
-        this.blockedContacts.unblock(jid, lid);
+    async unblockContact(jid: string | null, lid: string | null): Promise<void> {
+        await this.blockedContacts.unblock(jid, lid);
     }
 
-    getBlockedContacts(): StoredBlockedContact[] {
+    async getBlockedContacts(): Promise<StoredBlockedContact[]> {
         return this.blockedContacts.list();
     }
 }

@@ -1,37 +1,41 @@
-import { and, asc, desc, eq, ne } from 'drizzle-orm';
-import type { AppDatabase } from './database.js';
-import { messages } from './schema.js';
+import { Not, type DataSource, type Repository } from 'typeorm';
+import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity.js';
+import { MessageEntity } from './entities/message.entity.js';
 import type { CreateMessageInput, ListMessagesOptions, MessageStatus, StoredMessage } from '../types/message.types.js';
 
 /**
- * Patrón Repository: aísla el acceso a `messages` vía Drizzle. El resto de
+ * Patrón Repository: aísla el acceso a `messages` vía TypeORM. El resto de
  * la aplicación nunca construye queries directamente, solo usa estos
  * métodos tipados.
  */
 export class MessageRepository {
-    constructor(private readonly db: AppDatabase) {}
+    private readonly repo: Repository<MessageEntity>;
+
+    constructor(db: DataSource) {
+        this.repo = db.getRepository(MessageEntity);
+    }
 
     /** Persiste un mensaje. Devuelve null si el id ya existía (idempotente). */
-    save(input: CreateMessageInput): StoredMessage | null {
-        const existing = this.findById(input.id);
+    async save(input: CreateMessageInput): Promise<StoredMessage | null> {
+        const existing = await this.findById(input.id);
         if (existing) return existing;
 
-        this.db.insert(messages).values(input).run();
+        await this.repo.insert(input as QueryDeepPartialEntity<MessageEntity>);
         return this.findById(input.id);
     }
 
-    markDeleted(id: string): void {
-        this.db.update(messages).set({ isDeleted: true }).where(eq(messages.id, id)).run();
+    async markDeleted(id: string): Promise<void> {
+        await this.repo.update(id, { isDeleted: true });
     }
 
-    markEdited(id: string, newText: string | null): void {
-        this.db.update(messages).set({ textContent: newText, isEdited: true }).where(eq(messages.id, id)).run();
+    async markEdited(id: string, newText: string | null): Promise<void> {
+        await this.repo.update(id, { textContent: newText, isEdited: true });
     }
 
     /** Actualiza el estado de un mensaje (ack de envío/entrega). No retrocede si el id no existe. */
-    updateStatus(id: string, status: MessageStatus, statusTimestamp: number = Date.now()): void {
-        const result = this.db.update(messages).set({ status, statusTimestamp }).where(eq(messages.id, id)).run();
-        if (result.changes === 0) {
+    async updateStatus(id: string, status: MessageStatus, statusTimestamp: number = Date.now()): Promise<void> {
+        const result = await this.repo.update(id, { status, statusTimestamp });
+        if (!result.affected) {
             console.warn(`[MessageRepository] updateStatus no encontró mensaje con id=${id} (status=${status})`);
         } else {
             console.log(`[MessageRepository] Mensaje id=${id} actualizado a status=${status}.`);
@@ -43,11 +47,11 @@ export class MessageRepository {
      * a `acked`, guarda el raw de `{key, update}` del evento `messages.update`
      * que lo disparó, y `remoteJidAlt` si se pudo resolver el formato alternativo.
      */
-    ackOutbound(id: string, jsonAck: unknown, remoteJidAlt: string | null, statusTimestamp: number = Date.now()): void {
-        const changes: Partial<typeof messages.$inferInsert> = { status: 'acked', statusTimestamp, jsonAck };
+    async ackOutbound(id: string, jsonAck: unknown, remoteJidAlt: string | null, statusTimestamp: number = Date.now()): Promise<void> {
+        const changes = { status: 'acked', statusTimestamp, jsonAck } as QueryDeepPartialEntity<MessageEntity>;
         if (remoteJidAlt) changes.remoteJidAlt = remoteJidAlt;
-        const result = this.db.update(messages).set(changes).where(eq(messages.id, id)).run();
-        if (result.changes === 0) {
+        const result = await this.repo.update(id, changes);
+        if (!result.affected) {
             console.warn(`[MessageRepository] ackOutbound no encontró mensaje con id=${id}`);
         } else {
             console.log(`[MessageRepository] Mensaje id=${id} actualizado a status=acked (con ack guardado).`);
@@ -59,53 +63,49 @@ export class MessageRepository {
      * devuelto por Baileys como `rawPayload` y pasa el `status` de `pending` a `sent`.
      * Si Baileys asignó un `id` distinto al usado al crear el draft, también lo actualiza.
      */
-    markSent(draftId: string, finalId: string, rawPayload: unknown): void {
-        this.db
-            .update(messages)
-            .set({ id: finalId, rawPayload, status: 'sent', statusTimestamp: Date.now() })
-            .where(eq(messages.id, draftId))
-            .run();
+    async markSent(draftId: string, finalId: string, rawPayload: unknown): Promise<void> {
+        await this.repo.update(draftId, {
+            id: finalId,
+            rawPayload,
+            status: 'sent',
+            statusTimestamp: Date.now(),
+        } as QueryDeepPartialEntity<MessageEntity>);
     }
 
     /** Mensajes entrantes que todavía no fueron confirmados (`acked`) por el WS, en orden de llegada. */
-    listUnacked(): StoredMessage[] {
-        return this.db
-            .select()
-            .from(messages)
-            .where(and(eq(messages.fromMe, false), ne(messages.status, 'acked')))
-            .orderBy(asc(messages.messageTimestamp))
-            .all();
+    async listUnacked(): Promise<StoredMessage[]> {
+        return this.repo.find({
+            where: { fromMe: false, status: Not('acked') },
+            order: { messageTimestamp: 'ASC' },
+        });
     }
 
     /** Marca un mensaje entrante como empujado al WS, esperando ack. */
-    markPushed(id: string): void {
-        this.updateStatus(id, 'pushed');
+    async markPushed(id: string): Promise<void> {
+        await this.updateStatus(id, 'pushed');
     }
 
     /** Confirma que el WS recibió el mensaje. */
-    markAcked(id: string): void {
-        this.updateStatus(id, 'acked');
+    async markAcked(id: string): Promise<void> {
+        await this.updateStatus(id, 'acked');
     }
 
     /** Vuelve un mensaje a pendiente de reenvío (se agotaron los reintentos o se desconectó el WS). */
-    markPending(id: string): void {
-        this.updateStatus(id, 'received');
+    async markPending(id: string): Promise<void> {
+        await this.updateStatus(id, 'received');
     }
 
-    findById(id: string): StoredMessage | null {
-        const row = this.db.select().from(messages).where(eq(messages.id, id)).get();
-        return row ?? null;
+    async findById(id: string): Promise<StoredMessage | null> {
+        return this.repo.findOne({ where: { id } });
     }
 
-    list(options: ListMessagesOptions = {}): StoredMessage[] {
+    async list(options: ListMessagesOptions = {}): Promise<StoredMessage[]> {
         const { remoteJid, limit = 100 } = options;
 
-        const query = this.db.select().from(messages);
-
-        if (remoteJid) {
-            return query.where(eq(messages.remoteJid, remoteJid)).orderBy(desc(messages.messageTimestamp)).limit(limit).all();
-        }
-
-        return query.orderBy(desc(messages.messageTimestamp)).limit(limit).all();
+        return this.repo.find({
+            where: remoteJid ? { remoteJid } : {},
+            order: { messageTimestamp: 'DESC' },
+            take: limit,
+        });
     }
 }

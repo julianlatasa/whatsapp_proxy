@@ -1,7 +1,7 @@
 import { isLidUser, isPnUser } from '@whiskeysockets/baileys';
-import { eq, isNotNull, or } from 'drizzle-orm';
-import type { AppDatabase } from './database.js';
-import { contacts, messages } from './schema.js';
+import { Not, IsNull, type DataSource } from 'typeorm';
+import { ContactEntity } from './entities/contact.entity.js';
+import { MessageEntity } from './entities/message.entity.js';
 
 export interface JidAltBackfillResult {
     processed: number;
@@ -39,12 +39,13 @@ function resolveIds(key: WaMessageKey): ResolvedIds {
  * completa `remoteJidAlt` (formato alternativo lid <-> s.whatsapp.net) y la
  * tabla `contacts`, para datos guardados antes de que existieran esas columnas.
  */
-function backfillFromRawPayload(db: AppDatabase): { processed: number; updatedAlt: number; upsertedContacts: number } {
-    const rows = db
-        .select({ id: messages.id, rawPayload: messages.rawPayload })
-        .from(messages)
-        .where(isNotNull(messages.rawPayload))
-        .all();
+async function backfillFromRawPayload(db: DataSource): Promise<{ processed: number; updatedAlt: number; upsertedContacts: number }> {
+    const messageRepo = db.getRepository(MessageEntity);
+
+    const rows = await messageRepo.find({
+        select: { id: true, rawPayload: true },
+        where: { rawPayload: Not(IsNull()) },
+    });
 
     let processed = 0;
     let updatedAlt = 0;
@@ -61,12 +62,12 @@ function backfillFromRawPayload(db: AppDatabase): { processed: number; updatedAl
 
         const remoteJidAlt = key.participantAlt || key.remoteJidAlt || null;
         if (remoteJidAlt) {
-            db.update(messages).set({ remoteJidAlt }).where(eq(messages.id, row.id)).run();
+            await messageRepo.update(row.id, { remoteJidAlt });
             updatedAlt++;
         }
 
         if (jid || lid) {
-            upsertContact(db, jid, lid, waMessage?.pushName ?? null);
+            await upsertContact(db, jid, lid, waMessage?.pushName ?? null);
             upsertedContacts++;
         }
     }
@@ -74,21 +75,22 @@ function backfillFromRawPayload(db: AppDatabase): { processed: number; updatedAl
     return { processed, updatedAlt, upsertedContacts };
 }
 
-function upsertContact(db: AppDatabase, jid: string | null, lid: string | null, pushName: string | null): void {
+async function upsertContact(db: DataSource, jid: string | null, lid: string | null, pushName: string | null): Promise<void> {
     if (!jid && !lid) return;
 
-    const conditions = [jid ? eq(contacts.jid, jid) : undefined, lid ? eq(contacts.lid, lid) : undefined].filter(
+    const contactRepo = db.getRepository(ContactEntity);
+    const conditions = [jid ? { jid } : undefined, lid ? { lid } : undefined].filter(
         (c): c is NonNullable<typeof c> => c !== undefined
     );
-    const existing = db.select().from(contacts).where(or(...conditions)).get();
+    const existing = await contactRepo.findOne({ where: conditions });
 
     if (!existing) {
-        db.insert(contacts).values({ jid, lid, pushName }).run();
+        await contactRepo.insert({ jid, lid, pushName });
         return;
     }
 
-    if (jid && !existing.jid) db.update(contacts).set({ jid }).where(eq(contacts.id, existing.id)).run();
-    if (lid && !existing.lid) db.update(contacts).set({ lid }).where(eq(contacts.id, existing.id)).run();
+    if (jid && !existing.jid) await contactRepo.update(existing.id, { jid });
+    if (lid && !existing.lid) await contactRepo.update(existing.id, { lid });
 }
 
 /**
@@ -98,8 +100,9 @@ function upsertContact(db: AppDatabase, jid: string | null, lid: string | null, 
  * donde un mismo contacto podía quedar partido en dos filas (una solo con
  * jid, otra solo con lid) cuando WhatsApp no resolvía ambos formatos a la vez.
  */
-function mergeDuplicateContacts(db: AppDatabase): { mergedGroups: number; deletedRows: number } {
-    const rows = db.select().from(contacts).all();
+async function mergeDuplicateContacts(db: DataSource): Promise<{ mergedGroups: number; deletedRows: number }> {
+    const contactRepo = db.getRepository(ContactEntity);
+    const rows = await contactRepo.find();
 
     const parent = new Map(rows.map((row) => [row.id, row.id]));
     const find = (id: number): number => {
@@ -142,10 +145,10 @@ function mergeDuplicateContacts(db: AppDatabase): { mergedGroups: number; delete
         const lid = group.find((r) => r.lid)?.lid ?? null;
         const pushName = group.find((r) => r.pushName)?.pushName ?? null;
 
-        db.update(contacts).set({ jid, lid, pushName }).where(eq(contacts.id, rootId)).run();
+        await contactRepo.update(rootId, { jid, lid, pushName });
         for (const row of group) {
             if (row.id !== rootId) {
-                db.delete(contacts).where(eq(contacts.id, row.id)).run();
+                await contactRepo.delete(row.id);
                 deletedRows++;
             }
         }
@@ -156,11 +159,11 @@ function mergeDuplicateContacts(db: AppDatabase): { mergedGroups: number; delete
 }
 
 /** Idempotente: completa `remoteJidAlt`/`contacts` con datos viejos y fusiona contactos duplicados. */
-export function runJidAltBackfill(db: AppDatabase): JidAltBackfillResult {
+export async function runJidAltBackfill(db: DataSource): Promise<JidAltBackfillResult> {
     console.log('[jid-alt-backfill] Iniciando backfill de jid/lid y fusión de contactos...');
 
-    const { processed, updatedAlt, upsertedContacts } = backfillFromRawPayload(db);
-    const { mergedGroups, deletedRows } = mergeDuplicateContacts(db);
+    const { processed, updatedAlt, upsertedContacts } = await backfillFromRawPayload(db);
+    const { mergedGroups, deletedRows } = await mergeDuplicateContacts(db);
 
     console.log(
         `[jid-alt-backfill] Completado: ${processed} mensajes procesados, ${updatedAlt} remoteJidAlt actualizados, ` +
