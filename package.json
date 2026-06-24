@@ -10,7 +10,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "backfill:jid-alt": "npm run build && node scripts/backfill-jid-alt.mjs"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc13",

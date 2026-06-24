@@ -52,8 +52,24 @@ export class WsServer {
             this.pushToActive({ type: 'qr.code', id: randomUUID(), payload: { qr } });
         });
 
-        options.client.on('message.status-changed', (targetId, status) => {
-            this.pushToActive({ type: 'message.status-changed', id: randomUUID(), payload: { id: targetId, status } });
+        options.client.on('message.status-changed', (targetId, status, recipient, rawAck) => {
+            let jidAlt: string | null = null;
+            let senderName: string | null = null;
+
+            if (status === 'sent') {
+                jidAlt = rawAck.key.participantAlt ?? rawAck.key.remoteJidAlt ?? null;
+                senderName = rawAck.update.pushName ?? null;
+
+                this.options.messageRepository.saveAck(targetId, rawAck, jidAlt);
+                this.options.messageRepository.markAcked(targetId);
+                this.options.contactRepository.upsert({ jid: recipient.jid, lid: recipient.lid, pushName: senderName });
+            }
+
+            this.pushToActive({
+                type: 'message.status-changed',
+                id: randomUUID(),
+                payload: { id: targetId, status, jid: recipient.jid, lid: recipient.lid, jidAlt, senderName },
+            });
         });
 
         options.persistenceObserver.on('message.persisted', (message) => {
@@ -174,8 +190,13 @@ export class WsServer {
             case 'send.message': {
                 const { jid, text } = payload as ClientRequestPayloads['send.message'];
                 const draft = MessageFactory.createOutboundText(jid, text, id);
-                const waMessageId = await this.options.client.sendText(jid, text, draft.id);
-                const saved = this.options.messageRepository.save({ ...draft, id: waMessageId ?? draft.id });
+                this.options.messageRepository.save(draft);
+
+                const sent = await this.options.client.sendText(jid, text, draft.id);
+                const finalId = sent?.key?.id ?? draft.id;
+                this.options.messageRepository.markSent(draft.id, finalId, sent ?? null);
+
+                const saved = this.options.messageRepository.findById(finalId);
                 if (!saved) throw new Error(`No se pudo persistir el mensaje enviado: ${draft.id}`);
                 return saved as ClientResponsePayloads[T];
             }

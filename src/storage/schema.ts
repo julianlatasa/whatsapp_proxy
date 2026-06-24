@@ -28,6 +28,8 @@ export const messages = sqliteTable(
     {
         id: text('id').primaryKey(),
         remoteJid: text('remote_jid').notNull(),
+        /** Formato alternativo de `remoteJid` (lid <-> s.whatsapp.net) cuando Baileys lo expone en `key.remoteJidAlt`. */
+        remoteJidAlt: text('remote_jid_alt'),
         fromMe: integer('from_me', { mode: 'boolean' }).notNull().default(false),
         participant: text('participant'),
 
@@ -43,6 +45,8 @@ export const messages = sqliteTable(
         quotedMessageId: text('quoted_message_id'),
 
         rawPayload: text('raw_payload', { mode: 'json' }),
+        /** Raw de `{key, update}` del evento `messages.update` cuando `update.status === SERVER_ACK`. */
+        jsonAck: text('json_ack', { mode: 'json' }),
 
         isDeleted: integer('is_deleted', { mode: 'boolean' }).notNull().default(false),
         isEdited: integer('is_edited', { mode: 'boolean' }).notNull().default(false),

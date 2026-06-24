@@ -17,10 +17,23 @@ export interface LidResolvedPayload {
     lid: string;
 }
 
+export interface MessageStatusChangedPayload {
+    id: string;
+    status: MessageStatus;
+    /** Destinatario del mensaje saliente, formato "numero@s.whatsapp.net"; `null` si no se pudo resolver. */
+    jid: string | null;
+    /** Identificador estable (lid) del destinatario; `null` si no se pudo resolver. */
+    lid: string | null;
+    /** Formato alternativo de `remoteJid` (`key.remoteJidAlt`/`participantAlt`) reportado en el ack; `null` si no vino. */
+    jidAlt: string | null;
+    /** Nombre de perfil del destinatario reportado en el ack (`update.pushName`); `null` si no vino. */
+    senderName: string | null;
+}
+
 /** Frames que el servidor empuja sin que el cliente los haya pedido. */
 export type ServerPushFrame =
     | WsFrame<StoredMessage> // type: 'message.received' — entrante recién pusheado, esperando 'message.ack'
-    | WsFrame<{ id: string; status: MessageStatus }> // type: 'message.status-changed' — saliente, informativo
+    | WsFrame<MessageStatusChangedPayload> // type: 'message.status-changed' — saliente, informativo
     | WsFrame<{ status: ConnectionStatus }> // type: 'connection.status'
     | WsFrame<{ qr: string }> // type: 'qr.code'
     | WsFrame<LidResolvedPayload>; // type: 'contact.lid-resolved' — WhatsApp resolvió el lid de un numero

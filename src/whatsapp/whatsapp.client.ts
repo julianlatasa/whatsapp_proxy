@@ -9,6 +9,7 @@ import makeWASocket, {
     proto,
     useMultiFileAuthState,
     type WACallEvent,
+    type WAMessage,
     type WASocket,
 } from '@whiskeysockets/baileys';
 import { rm } from 'node:fs/promises';
@@ -49,13 +50,18 @@ export interface SeenContact {
     pushName: string | null;
 }
 
+export interface RecipientIds {
+    jid: string | null;
+    lid: string | null;
+}
+
 export type WhatsAppClientEvents = {
     qr: (qr: string) => void;
     'connection.update': (status: ConnectionStatus) => void;
     'message.received': (message: CreateMessageInput) => void;
     'message.deleted': (targetId: string) => void;
     'message.edited': (targetId: string, newText: string | null) => void;
-    'message.status-changed': (targetId: string, status: MessageStatus) => void;
+    'message.status-changed': (targetId: string, status: MessageStatus, recipient: RecipientIds, rawAck: BaileysEventMap['messages.update'][number]) => void;
     'call.incoming': (call: WACallEvent) => void;
     'contact.seen': (contact: SeenContact) => void;
     'contact.lid-resolved': (mapping: LIDMapping) => void;
@@ -151,9 +157,10 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
     /**
      * Envía un mensaje de texto, simulando que se está tipeando antes de
      * mandarlo. `messageId` permite forzar el `key.id` para que coincida con
-     * el id usado al persistir el mensaje saliente.
+     * el id usado al persistir el mensaje saliente. Devuelve el `WAMessage`
+     * completo (mismo shape que se guarda como `rawPayload` en entrantes).
      */
-    async sendText(jid: string, text: string, messageId?: string): Promise<string | null> {
+    async sendText(jid: string, text: string, messageId?: string): Promise<WAMessage | null> {
         if (!this.socket || this.status !== ConnectionStatus.OPEN) {
             throw new Error(`No conectado a WhatsApp (estado: ${this.status})`);
         }
@@ -162,7 +169,7 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
 
         const content: AnyMessageContent = { text };
         const sent = await this.socket.sendMessage(jid, content, messageId ? { messageId } : undefined);
-        return sent?.key?.id ?? null;
+        return sent ?? null;
     }
 
     private async simulateTyping(jid: string): Promise<void> {
@@ -255,12 +262,13 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
 
     /** Ack de envío/entrega de mensajes salientes (status: SERVER_ACK, DELIVERY_ACK, ...). */
     private onMessagesUpdate(updates: BaileysEventMap['messages.update']): void {
-        for (const { key, update } of updates) {
+        for (const entry of updates) {
+            const { key, update } = entry;
             if (!key.id || update.status == null) continue;
 
             const mappedStatus = ACK_STATUS_MAP[update.status];
             if (mappedStatus) {
-                this.emit('message.status-changed', key.id, mappedStatus);
+                this.emit('message.status-changed', key.id, mappedStatus, this.resolveSenderIds(key), entry);
             }
         }
     }

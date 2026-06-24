@@ -36,6 +36,29 @@ export class MessageRepository {
         }
     }
 
+    /**
+     * Guarda el raw de `{key, update}` del evento `messages.update` que disparó
+     * el SERVER_ACK, y `remoteJidAlt` si se pudo resolver el formato alternativo.
+     */
+    saveAck(id: string, jsonAck: unknown, remoteJidAlt: string | null): void {
+        const changes: Partial<typeof messages.$inferInsert> = { jsonAck };
+        if (remoteJidAlt) changes.remoteJidAlt = remoteJidAlt;
+        this.db.update(messages).set(changes).where(eq(messages.id, id)).run();
+    }
+
+    /**
+     * Confirma que un mensaje saliente salió hacia WhatsApp: guarda el `WAMessage`
+     * devuelto por Baileys como `rawPayload` y pasa el `status` de `pending` a `sent`.
+     * Si Baileys asignó un `id` distinto al usado al crear el draft, también lo actualiza.
+     */
+    markSent(draftId: string, finalId: string, rawPayload: unknown): void {
+        this.db
+            .update(messages)
+            .set({ id: finalId, rawPayload, status: 'sent', statusTimestamp: Date.now() })
+            .where(eq(messages.id, draftId))
+            .run();
+    }
+
     /** Mensajes entrantes que todavía no fueron confirmados (`acked`) por el WS, en orden de llegada. */
     listUnacked(): StoredMessage[] {
         return this.db

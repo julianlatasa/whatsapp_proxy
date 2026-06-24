@@ -7,6 +7,7 @@ import { MessageFactory } from './patterns/message.factory.js';
 import { BlockedContactRepository } from './storage/blocked-contact.repository.js';
 import { ContactRepository } from './storage/contact.repository.js';
 import { DatabaseConnection } from './storage/database.js';
+import { runJidAltBackfill } from './storage/jid-alt-backfill.js';
 import { MessageRepository } from './storage/message.repository.js';
 import type { StoredBlockedContact } from './types/blocked-contact.types.js';
 import type { ListMessagesOptions, StoredMessage } from './types/message.types.js';
@@ -36,6 +37,8 @@ export class WhatsAppProxyApp {
         mkdirSync(dirname(options.dbPath), { recursive: true });
 
         const db = DatabaseConnection.getInstance(options.dbPath);
+        runJidAltBackfill(db);
+
         this.repository = new MessageRepository(db);
         this.blockedContacts = new BlockedContactRepository(db);
         const contactRepository = new ContactRepository(db);
@@ -74,9 +77,13 @@ export class WhatsAppProxyApp {
     /** Envía un mensaje de texto y lo persiste como saliente (`fromMe: true`). */
     async sendMessage(jid: string, text: string): Promise<StoredMessage> {
         const draft = MessageFactory.createOutboundText(jid, text);
-        const waMessageId = await this.client.sendText(jid, text, draft.id);
+        this.repository.save(draft);
 
-        const saved = this.repository.save({ ...draft, id: waMessageId ?? draft.id });
+        const sent = await this.client.sendText(jid, text, draft.id);
+        const finalId = sent?.key?.id ?? draft.id;
+        this.repository.markSent(draft.id, finalId, sent ?? null);
+
+        const saved = this.repository.findById(finalId);
         if (!saved) {
             throw new Error(`No se pudo persistir el mensaje enviado: ${draft.id}`);
         }
