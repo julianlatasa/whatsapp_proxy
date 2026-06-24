@@ -79,8 +79,8 @@ const KEEP_ALIVE_INTERVAL_MS = 30_000;
 
 /** Mapea el ack numérico de WhatsApp a los estados que modelamos (sin `read`/`played`). */
 const ACK_STATUS_MAP: Partial<Record<proto.WebMessageInfo.Status, MessageStatus>> = {
-    [proto.WebMessageInfo.Status.SERVER_ACK]: 'sent',
-    [proto.WebMessageInfo.Status.DELIVERY_ACK]: 'delivered',
+    [proto.WebMessageInfo.Status.SERVER_ACK]: 'acked',
+    [proto.WebMessageInfo.Status.DELIVERY_ACK]: 'acked',
 };
 
 /**

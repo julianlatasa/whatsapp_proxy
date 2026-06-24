@@ -11,10 +11,11 @@ export interface MessageKey {
 }
 
 /**
- * Estado del mensaje. Entrantes solo llegan a `received`. Salientes
- * progresan `pending` -> `sent` (ack de servidor) -> `delivered` (ack de
- * entrega al destinatario); WhatsApp también distingue `read`/`played`, pero
- * no se modelan por ahora.
+ * Estado del mensaje. Entrantes progresan `received` -> `pushed` -> `acked`
+ * (confirmados por el cliente WS). Salientes progresan `pending` -> `sent`
+ * (confirmado el envío a Baileys) -> `acked` (WhatsApp respondió
+ * SERVER_ACK o DELIVERY_ACK); WhatsApp también distingue `read`/`played`,
+ * pero no se modelan por ahora.
  */
 export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
 
