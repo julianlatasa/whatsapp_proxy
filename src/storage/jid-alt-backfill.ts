@@ -157,8 +157,15 @@ function mergeDuplicateContacts(db: AppDatabase): { mergedGroups: number; delete
 
 /** Idempotente: completa `remoteJidAlt`/`contacts` con datos viejos y fusiona contactos duplicados. */
 export function runJidAltBackfill(db: AppDatabase): JidAltBackfillResult {
+    console.log('[jid-alt-backfill] Iniciando backfill de jid/lid y fusión de contactos...');
+
     const { processed, updatedAlt, upsertedContacts } = backfillFromRawPayload(db);
     const { mergedGroups, deletedRows } = mergeDuplicateContacts(db);
+
+    console.log(
+        `[jid-alt-backfill] Completado: ${processed} mensajes procesados, ${updatedAlt} remoteJidAlt actualizados, ` +
+            `${upsertedContacts} contactos creados/actualizados, ${mergedGroups} grupos fusionados, ${deletedRows} filas duplicadas eliminadas.`
+    );
 
     return { processed, updatedAlt, upsertedContacts, mergedGroups, deletedRows };
 }

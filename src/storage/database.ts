@@ -31,7 +31,9 @@ export class DatabaseConnection {
             sqlite.pragma('journal_mode = WAL');
 
             const db = drizzle(sqlite, { schema });
+            console.log(`[database] Aplicando migraciones desde ${MIGRATIONS_FOLDER}...`);
             migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+            console.log('[database] Migraciones aplicadas.');
 
             DatabaseConnection.sqlite = sqlite;
             DatabaseConnection.instance = db;
