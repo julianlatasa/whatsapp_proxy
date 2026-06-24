@@ -56,12 +56,11 @@ export class WsServer {
             let jidAlt: string | null = null;
             let senderName: string | null = null;
 
-            if (status === 'sent') {
+            if (status === 'acked') {
                 jidAlt = rawAck.key.participantAlt ?? rawAck.key.remoteJidAlt ?? null;
                 senderName = rawAck.update.pushName ?? null;
 
-                this.options.messageRepository.saveAck(targetId, rawAck, jidAlt);
-                this.options.messageRepository.markAcked(targetId);
+                this.options.messageRepository.ackOutbound(targetId, rawAck, jidAlt);
                 this.options.contactRepository.upsert({ jid: recipient.jid, lid: recipient.lid, pushName: senderName });
             }
 

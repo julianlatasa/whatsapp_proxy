@@ -19,7 +19,7 @@ export const MESSAGE_TYPES = [
     'unknown',
 ] as const;
 
-export const MESSAGE_STATUSES = ['pending', 'sent', 'delivered', 'received', 'pushed', 'acked'] as const;
+export const MESSAGE_STATUSES = ['pending', 'sent', 'received', 'pushed', 'acked'] as const;
 
 const epochMs = sql`(unixepoch('now','subsec') * 1000)`;
 

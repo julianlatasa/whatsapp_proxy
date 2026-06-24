@@ -48,6 +48,8 @@ export class PersistenceObserver extends TypedEventEmitter<PersistenceObserverEv
         });
 
         client.on('message.status-changed', (targetId, status) => {
+            // `acked` para salientes lo persiste WsServer en un solo UPDATE junto con el ack crudo (ver ackOutbound).
+            if (status === 'acked') return;
             this.repository.updateStatus(targetId, status);
         });
     }

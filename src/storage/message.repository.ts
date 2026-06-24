@@ -39,13 +39,19 @@ export class MessageRepository {
     }
 
     /**
-     * Guarda el raw de `{key, update}` del evento `messages.update` que disparó
-     * el SERVER_ACK, y `remoteJidAlt` si se pudo resolver el formato alternativo.
+     * Confirma en un solo UPDATE el ack de un mensaje saliente: pasa el `status`
+     * a `acked`, guarda el raw de `{key, update}` del evento `messages.update`
+     * que lo disparó, y `remoteJidAlt` si se pudo resolver el formato alternativo.
      */
-    saveAck(id: string, jsonAck: unknown, remoteJidAlt: string | null): void {
-        const changes: Partial<typeof messages.$inferInsert> = { jsonAck };
+    ackOutbound(id: string, jsonAck: unknown, remoteJidAlt: string | null, statusTimestamp: number = Date.now()): void {
+        const changes: Partial<typeof messages.$inferInsert> = { status: 'acked', statusTimestamp, jsonAck };
         if (remoteJidAlt) changes.remoteJidAlt = remoteJidAlt;
-        this.db.update(messages).set(changes).where(eq(messages.id, id)).run();
+        const result = this.db.update(messages).set(changes).where(eq(messages.id, id)).run();
+        if (result.changes === 0) {
+            console.warn(`[MessageRepository] ackOutbound no encontró mensaje con id=${id}`);
+        } else {
+            console.log(`[MessageRepository] Mensaje id=${id} actualizado a status=acked (con ack guardado).`);
+        }
     }
 
     /**
