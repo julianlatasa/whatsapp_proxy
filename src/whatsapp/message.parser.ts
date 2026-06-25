@@ -6,8 +6,8 @@ import { CONTENT_STRATEGIES, findQuotedMessageId, unwrapMessage } from './conten
 const ALLOWED_INBOUND_TYPES: ReadonlySet<MessageType> = new Set([
     'conversation',
     'extendedTextMessage',
-    'imageMessage',
-    'audioMessage',
+    //'imageMessage',
+    //'audioMessage',
 ]);
 
 export interface DeleteEvent {

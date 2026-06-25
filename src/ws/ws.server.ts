@@ -1,13 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { PersistenceObserver } from '../observers/persistence.observer.js';
-import { MessageFactory } from '../patterns/message.factory.js';
 import type { BlockedContactRepository } from '../storage/blocked-contact.repository.js';
 import type { ContactRepository } from '../storage/contact.repository.js';
 import type { MessageRepository } from '../storage/message.repository.js';
 import type { StoredMessage } from '../types/message.types.js';
-import { ConnectionStatus, type RecipientIds, type WhatsAppClient } from '../whatsapp/whatsapp.client.js';
+import { extractValidJidAlt } from '../whatsapp/jid.utils.js';
+import { ConnectionStatus, type WhatsAppClient } from '../whatsapp/whatsapp.client.js';
 import { AckTracker } from './ack-tracker.js';
+import { handleBlockedAdd, handleBlockedList, handleBlockedRemove } from './handlers/blocked-contact.handlers.js';
+import { handleConnectionStatusGet, handleQrGet, handleQrRefresh, handleSessionLogout } from './handlers/connection.handlers.js';
+import { handleContactLookupByJid, handleContactLookupByLid } from './handlers/contact.handlers.js';
+import { handleMessageAck, handleSendMessage, type MessageHandlerDeps } from './handlers/message.handlers.js';
 import {
     isClientRequestType,
     type ClientRequestPayloads,
@@ -32,15 +36,18 @@ const REPLACED_CONNECTION_CODE = 4000;
 /**
  * Único punto de entrada externo al proceso. Acepta un solo cliente WS a la
  * vez (un orquestador externo); si se conecta uno nuevo, reemplaza al
- * anterior. Traduce el protocolo `{type, id, payload}` hacia/desde los
- * eventos y repositorios ya existentes — no duplica lógica de negocio.
+ * anterior. Es una capa de transporte pura: traduce frames `{type, id,
+ * payload}` hacia/desde eventos y delega cada request a su handler de
+ * dominio (`./handlers`); no contiene lógica de negocio propia.
  */
 export class WsServer {
     private readonly wss: WebSocketServer;
     private readonly ackTracker = new AckTracker((id) => this.handlePushGiveUp(id));
     private activeSocket: WebSocket | null = null;
+    private readonly messageHandlerDeps: MessageHandlerDeps;
 
     constructor(private readonly options: WsServerOptions) {
+        this.messageHandlerDeps = { client: options.client, messageRepository: options.messageRepository, ackTracker: this.ackTracker };
         this.wss = new WebSocketServer({ port: options.port });
         this.wss.on('connection', (socket) => this.onConnection(socket));
 
@@ -53,15 +60,11 @@ export class WsServer {
         });
 
         options.client.on('message.status-changed', (targetId, status, recipient, rawAck) => {
-            let jidAlt: string | null = null;
-            let senderName: string | null = null;
+            const jidAlt = status === 'acked' ? extractValidJidAlt(rawAck.key) : null;
+            const senderName = status === 'acked' ? rawAck.update.pushName ?? null : null;
 
             if (status === 'acked') {
-                jidAlt = rawAck.key.participantAlt ?? rawAck.key.remoteJidAlt ?? null;
-                senderName = rawAck.update.pushName ?? null;
-
                 void this.options.messageRepository.ackOutbound(targetId, rawAck, jidAlt, rawAck.key.remoteJid ?? null);
-                void this.upsertAckedContact(recipient, senderName);
             }
 
             this.pushToActive({
@@ -81,27 +84,6 @@ export class WsServer {
                 id: randomUUID(),
                 payload: { jid: mapping.pn, lid: mapping.lid },
             });
-        });
-    }
-
-    /**
-     * El ack de un mensaje saliente puede traer solo uno de jid/lid (el otro
-     * vino null en `resolveSenderIds` porque Baileys no expuso el `*Alt` esa
-     * vez). Si el contacto ya existe con el id complementario guardado de
-     * antes, lo completamos ahí en vez de dejar que `upsert` cree una fila
-     * duplicada al no encontrar match por el id que falta.
-     */
-    private async upsertAckedContact(recipient: RecipientIds, pushName: string | null): Promise<void> {
-        const existing = recipient.jid
-            ? await this.options.contactRepository.findByJid(recipient.jid)
-            : recipient.lid
-              ? await this.options.contactRepository.findByLid(recipient.lid)
-              : null;
-
-        await this.options.contactRepository.upsert({
-            jid: recipient.jid ?? existing?.jid ?? null,
-            lid: recipient.lid ?? existing?.lid ?? null,
-            pushName,
         });
     }
 
@@ -200,69 +182,40 @@ export class WsServer {
 
     private async dispatch<T extends ClientRequestType>(type: T, id: string, payload: ClientRequestPayloads[T]): Promise<ClientResponsePayloads[T]> {
         switch (type) {
-            case 'message.ack': {
-                const { id } = payload as ClientRequestPayloads['message.ack'];
-                this.ackTracker.ack(id);
-                await this.options.messageRepository.markAcked(id);
-                return { ok: true } as ClientResponsePayloads[T];
-            }
+            case 'message.ack':
+                return handleMessageAck(this.messageHandlerDeps, payload as ClientRequestPayloads['message.ack']) as Promise<ClientResponsePayloads[T]>;
 
-            case 'send.message': {
-                const { jid, text } = payload as ClientRequestPayloads['send.message'];
-                const draft = MessageFactory.createOutboundText(jid, text, id);
-                await this.options.messageRepository.save(draft);
-
-                const sent = await this.options.client.sendText(jid, text, draft.id);
-                const finalId = sent?.key?.id ?? draft.id;
-                console.log(`[ws.server] Mensaje enviado: draft.id=${draft.id} sent.key.id=${sent?.key?.id ?? '(sin respuesta)'} -> finalId=${finalId}`);
-                if (finalId !== draft.id) {
-                    console.warn(`[ws.server] WhatsApp devolvió un id distinto al forzado: draft=${draft.id} final=${finalId}`);
-                }
-                await this.options.messageRepository.markSent(draft.id, finalId, sent ?? null);
-                console.log(`[ws.server] Mensaje persistido en DB con id=${finalId} (status=sent).`);
-
-                const saved = await this.options.messageRepository.findById(finalId);
-                if (!saved) throw new Error(`No se pudo persistir el mensaje enviado: ${draft.id}`);
-                return saved as ClientResponsePayloads[T];
-            }
+            case 'send.message':
+                return handleSendMessage(this.messageHandlerDeps, id, payload as ClientRequestPayloads['send.message']) as Promise<
+                    ClientResponsePayloads[T]
+                >;
 
             case 'connection.status.get':
-                return { status: this.options.client.getStatus() } as ClientResponsePayloads[T];
+                return handleConnectionStatusGet(this.options) as ClientResponsePayloads[T];
 
             case 'qr.get':
-                return { qr: this.options.client.getLastQr() } as ClientResponsePayloads[T];
+                return handleQrGet(this.options) as ClientResponsePayloads[T];
 
             case 'qr.refresh':
-                await this.options.client.requestFreshQr();
-                return { ok: true } as ClientResponsePayloads[T];
+                return handleQrRefresh(this.options) as Promise<ClientResponsePayloads[T]>;
 
             case 'session.logout':
-                await this.options.logout();
-                return { ok: true } as ClientResponsePayloads[T];
+                return handleSessionLogout(this.options) as Promise<ClientResponsePayloads[T]>;
 
-            case 'blocked.add': {
-                const { jid, lid } = payload as ClientRequestPayloads['blocked.add'];
-                return (await this.options.blockedContactRepository.block({ jid, lid })) as ClientResponsePayloads[T];
-            }
+            case 'blocked.add':
+                return handleBlockedAdd(this.options, payload as ClientRequestPayloads['blocked.add']) as Promise<ClientResponsePayloads[T]>;
 
-            case 'blocked.remove': {
-                const { jid, lid } = payload as ClientRequestPayloads['blocked.remove'];
-                await this.options.blockedContactRepository.unblock(jid, lid);
-                return { ok: true } as ClientResponsePayloads[T];
-            }
+            case 'blocked.remove':
+                return handleBlockedRemove(this.options, payload as ClientRequestPayloads['blocked.remove']) as Promise<ClientResponsePayloads[T]>;
 
             case 'blocked.list':
-                return (await this.options.blockedContactRepository.list()) as ClientResponsePayloads[T];
+                return handleBlockedList(this.options) as Promise<ClientResponsePayloads[T]>;
 
-            case 'contact.lookup-by-jid': {
-                const { jid } = payload as ClientRequestPayloads['contact.lookup-by-jid'];
-                return (await this.options.contactRepository.findByJid(jid)) as ClientResponsePayloads[T];
-            }
+            case 'contact.lookup-by-jid':
+                return handleContactLookupByJid(this.options, payload as ClientRequestPayloads['contact.lookup-by-jid']) as Promise<ClientResponsePayloads[T]>;
 
-            case 'contact.lookup-by-lid': {
-                const { lid } = payload as ClientRequestPayloads['contact.lookup-by-lid'];
-                return (await this.options.contactRepository.findByLid(lid)) as ClientResponsePayloads[T];
-            }
+            case 'contact.lookup-by-lid':
+                return handleContactLookupByLid(this.options, payload as ClientRequestPayloads['contact.lookup-by-lid']) as Promise<ClientResponsePayloads[T]>;
 
             default:
                 throw new Error(`Tipo de request no soportado: ${type satisfies never}`);

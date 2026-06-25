@@ -1,6 +1,8 @@
 import { ConsoleLoggerObserver } from './observers/console-logger.observer.js';
+import { ContactLidReconciliationObserver } from './observers/contact-lid-reconciliation.observer.js';
 import { ContactRegistryObserver } from './observers/contact-registry.observer.js';
 import { PersistenceObserver } from './observers/persistence.observer.js';
+import { UnsupportedTypeNotifierObserver } from './observers/unsupported-type-notifier.observer.js';
 import { MessageFactory } from './patterns/message.factory.js';
 import { BlockedContactRepository } from './storage/blocked-contact.repository.js';
 import { ContactRepository } from './storage/contact.repository.js';
@@ -42,8 +44,10 @@ export class WhatsAppProxyApp {
         this.blockedContacts = blockedContacts;
 
         new ConsoleLoggerObserver(this.client);
+        new UnsupportedTypeNotifierObserver(this.client);
         const persistenceObserver = new PersistenceObserver(this.client, this.repository, this.blockedContacts);
         new ContactRegistryObserver(this.client, contactRepository);
+        new ContactLidReconciliationObserver(this.client, contactRepository);
 
         this.wsServer = new WsServer({
             port: wsPort,
