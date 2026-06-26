@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { generateMessageID } from '@whiskeysockets/baileys';
 import type { CreateMessageInput } from '../types/message.types.js';
 
 /**
@@ -7,7 +7,7 @@ import type { CreateMessageInput } from '../types/message.types.js';
  * obligatorios completos sin duplicar literales por toda la app.
  */
 export class MessageFactory {
-    static createOutboundText(remoteJid: string, text: string, id: string = randomUUID()): CreateMessageInput {
+    static createOutboundText(remoteJid: string, text: string, id: string = generateMessageID()): CreateMessageInput {
         const now = Date.now();
         return {
             id,

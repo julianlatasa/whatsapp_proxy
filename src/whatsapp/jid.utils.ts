@@ -18,7 +18,7 @@ export function resolveSenderIds(key: MessageKey): ResolvedIds {
 
     const candidates = [primary, alt].filter((id): id is string => !!id);
     const jid = candidates.find((id) => isPnUser(id)) ?? null;
-    const lid = candidates.find((id) => isLidUser(id)) ?? null;
+    const lid = candidates.find((id) => isLidUser(id) && !isDeviceSpecificJid(id)) ?? null;
 
     return { jid: jid ? jidNormalizedUser(jid) : null, lid: lid ? jidNormalizedUser(lid) : null };
 }
