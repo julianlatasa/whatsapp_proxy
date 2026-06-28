@@ -129,7 +129,9 @@ export class MessageParser {
         const { key, messageStubType, messageStubParameters, messageTimestamp, pushName } = waMessage;
         if (waMessage.message || messageStubType == null || !key.remoteJid || !key.id) return null;
 
-        const label = STUB_TYPE_LABELS[messageStubType] ?? `Evento de grupo (tipo ${messageStubType})`;
+        const label = STUB_TYPE_LABELS[messageStubType];
+        if (!label) return null;
+
         const textContent = messageStubParameters?.length ? `${label}: ${messageStubParameters.join(', ')}` : label;
         const timestamp = messageTimestamp ? Number(messageTimestamp) * 1_000 : Date.now();
 
