@@ -45,7 +45,7 @@ export class WhatsAppProxyApp {
         new ConsoleLoggerObserver(this.client);
         new UnsupportedTypeNotifierObserver(this.client);
         const persistenceObserver = new PersistenceObserver(this.client, this.repository, this.blockedContacts);
-        new ContactObserver(this.client, contactRepository);
+        new ContactObserver(this.client, contactRepository, this.repository);
 
         this.wsServer = new WsServer({
             port: wsPort,

@@ -1,6 +1,7 @@
-import { isJidGroup, isLidUser } from '@whiskeysockets/baileys';
+import { isJidGroup, isLidUser, isPnUser } from '@whiskeysockets/baileys';
 import type { ContactRepository } from '../storage/contact.repository.js';
-import { extractValidJidAlt } from '../whatsapp/jid.utils.js';
+import type { MessageRepository } from '../storage/message.repository.js';
+import { extractValidJidAlt, isDeviceSpecificJid } from '../whatsapp/jid.utils.js';
 import type { WhatsAppClient } from '../whatsapp/whatsapp.client.js';
 
 /**
@@ -10,10 +11,15 @@ import type { WhatsAppClient } from '../whatsapp/whatsapp.client.js';
  * - contact.lid-resolved → completa el lid de un contacto ya conocido por jid
  *   (o crea la fila si todavía no existe)
  * - message.status-changed (acked, 1-a-1) → upsert con jid + lid descubierto
- *   en el jidAlt del ack + pushName
+ *   en el jidAlt del ack + pushName; si hay lid, busca el mensaje original
+ *   para reconciliar el contacto guardado solo con jid.
  */
 export class ContactObserver {
-    constructor(client: WhatsAppClient, private readonly repo: ContactRepository) {
+    constructor(
+        client: WhatsAppClient,
+        private readonly repo: ContactRepository,
+        private readonly messages: MessageRepository,
+    ) {
         client.on('contact.seen', (contact) => {
             void this.repo.upsert(contact);
         });
@@ -29,7 +35,22 @@ export class ContactObserver {
             const jidAlt = extractValidJidAlt(rawAck.key, (raw) =>
                 console.log(`[ContactObserver] jidAlt de device específico descartado (contiene ':'): ${raw}`)
             );
-            const lidFromAck = jidAlt && isLidUser(jidAlt) ? jidAlt : null;
+            const remoteJid = rawAck.key.remoteJid ?? null;
+            const lidFromAck =
+                (jidAlt && isLidUser(jidAlt) ? jidAlt : null) ??
+                (remoteJid && isLidUser(remoteJid) && !isDeviceSpecificJid(remoteJid) ? remoteJid : null);
+
+            if (lidFromAck) {
+                void this.messages.findById(_targetId).then((msg) => {
+                    if (!msg) return;
+                    const candidates = [msg.remoteJid, msg.remoteJidAlt].filter(
+                        (id): id is string => !!id && !!isPnUser(id),
+                    );
+                    for (const pn of candidates) {
+                        void this.repo.upsertLid(pn, lidFromAck);
+                    }
+                });
+            }
 
             void this.repo.upsert({
                 jid: recipient.jid ?? null,
