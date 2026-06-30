@@ -10,7 +10,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
-    "db:backup": "node scripts/backup.mjs"
+    "db:backup": "node scripts/backup.mjs",
+    "db:dedupe-contacts": "node scripts/dedupe-contacts.mjs"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc13",

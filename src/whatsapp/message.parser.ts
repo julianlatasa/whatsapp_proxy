@@ -29,6 +29,12 @@ export interface UnsupportedTypeEvent {
     remoteJid: string;
 }
 
+/** Mensaje entrante que Baileys no pudo descifrar (stub CIPHERTEXT); el contenido original se perdió. */
+export interface DecryptionFailureEvent {
+    kind: 'decryption-failure';
+    senderJid: string;
+}
+
 function isUnsupportedTypeEvent(value: CreateMessageInput | UnsupportedTypeEvent): value is UnsupportedTypeEvent {
     return (value as UnsupportedTypeEvent).kind === 'unsupported';
 }
@@ -125,9 +131,13 @@ export class MessageParser {
     }
 
     /** Eventos administrativos de grupo (sin `.message`, solo `messageStubType`). */
-    parseStub(waMessage: WAMessage): CreateMessageInput | null {
+    parseStub(waMessage: WAMessage): CreateMessageInput | DecryptionFailureEvent | null {
         const { key, messageStubType, messageStubParameters, messageTimestamp, pushName } = waMessage;
         if (waMessage.message || messageStubType == null || !key.remoteJid || !key.id) return null;
+
+        if (messageStubType === proto.WebMessageInfo.StubType.CIPHERTEXT) {
+            return { kind: 'decryption-failure', senderJid: key.participant ?? key.remoteJid };
+        }
 
         const label = STUB_TYPE_LABELS[messageStubType];
         if (!label) return null;

@@ -16,13 +16,20 @@ import pino from 'pino';
 import { TypedEventEmitter } from '../events/typed-emitter.js';
 import type { CreateMessageInput, MessageStatus } from '../types/message.types.js';
 import { CallRejectionHandler } from './call-rejection.handler.js';
+import { DecryptionFailureHandler } from './decryption-failure.handler.js';
 import { resolveSenderIds } from './jid.utils.js';
 import { isWithinRetentionWindow } from './message-freshness.js';
-import { MessageParser, type UnsupportedTypeEvent } from './message.parser.js';
+import { MessageParser, type DecryptionFailureEvent, type UnsupportedTypeEvent } from './message.parser.js';
 import { ReconnectScheduler } from './reconnect-scheduler.js';
 
-function isUnsupportedTypeEvent(value: CreateMessageInput | UnsupportedTypeEvent): value is UnsupportedTypeEvent {
+type ParsedIncoming = CreateMessageInput | UnsupportedTypeEvent | DecryptionFailureEvent;
+
+function isUnsupportedTypeEvent(value: ParsedIncoming): value is UnsupportedTypeEvent {
     return (value as UnsupportedTypeEvent).kind === 'unsupported';
+}
+
+function isDecryptionFailureEvent(value: ParsedIncoming): value is DecryptionFailureEvent {
+    return (value as DecryptionFailureEvent).kind === 'decryption-failure';
 }
 
 export const ConnectionStatus = {
@@ -89,6 +96,9 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
     private readonly reconnectScheduler = new ReconnectScheduler();
     private readonly callRejectionHandler = new CallRejectionHandler({
         getSocket: () => this.socket,
+        sendText: (jid, text) => this.sendText(jid, text),
+    });
+    private readonly decryptionFailureHandler = new DecryptionFailureHandler({
         sendText: (jid, text) => this.sendText(jid, text),
     });
 
@@ -291,6 +301,13 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
 
         const parsed = waMessage.message ? this.parser.parseWithUnsupported(waMessage) : this.parser.parseStub(waMessage);
         if (!parsed) return;
+
+        if (isDecryptionFailureEvent(parsed)) {
+            if (options.notifyUnsupported) {
+                void this.decryptionFailureHandler.notify(parsed.senderJid);
+            }
+            return;
+        }
 
         if (isUnsupportedTypeEvent(parsed)) {
             if (options.notifyUnsupported) {
