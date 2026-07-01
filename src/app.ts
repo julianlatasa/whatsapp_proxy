@@ -17,6 +17,7 @@ export interface WhatsAppProxyAppOptions {
     authDir: string;
     browserName?: string;
     wsPort: number;
+    callRejectionMessage?: string;
 }
 
 /**
@@ -64,7 +65,7 @@ export class WhatsAppProxyApp {
         const repository = new MessageRepository(db);
         const blockedContacts = new BlockedContactRepository(db);
         const contactRepository = new ContactRepository(db);
-        const client = new WhatsAppClient({ authDir: options.authDir, browserName: options.browserName });
+        const client = new WhatsAppClient({ authDir: options.authDir, browserName: options.browserName, callRejectionMessage: options.callRejectionMessage });
 
         return new WhatsAppProxyApp(client, repository, blockedContacts, contactRepository, options.wsPort);
     }

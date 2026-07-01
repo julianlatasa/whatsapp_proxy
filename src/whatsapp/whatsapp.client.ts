@@ -45,6 +45,7 @@ export type ConnectionStatus = (typeof ConnectionStatus)[keyof typeof Connection
 export interface WhatsAppClientOptions {
     authDir?: string;
     browserName?: string;
+    callRejectionMessage?: string;
 }
 
 export interface SeenContact {
@@ -94,10 +95,7 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
     private readonly browserName: string;
     private readonly parser = new MessageParser();
     private readonly reconnectScheduler = new ReconnectScheduler();
-    private readonly callRejectionHandler = new CallRejectionHandler({
-        getSocket: () => this.socket,
-        sendText: (jid, text) => this.sendText(jid, text),
-    });
+    private readonly callRejectionHandler: CallRejectionHandler;
     private readonly decryptionFailureHandler = new DecryptionFailureHandler({
         sendText: (jid, text) => this.sendText(jid, text),
     });
@@ -110,6 +108,12 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
         super();
         this.authDir = options.authDir ?? 'auth_info_baileys';
         this.browserName = options.browserName ?? 'WhatsAppProxy';
+        this.callRejectionHandler = new CallRejectionHandler({
+            getSocket: () => this.socket,
+            sendTextDirect: (jid, text) => this.sendTextDirect(jid, text),
+            rejectionMessage: options.callRejectionMessage ?? 'Esta línea es solo para mensajes y no admite llamadas.',
+            onIncomingCall: (call) => this.emit('call.incoming', call),
+        });
     }
 
     getStatus(): ConnectionStatus {
@@ -164,6 +168,16 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
 
         const content: AnyMessageContent = { text };
         const sent = await this.socket.sendMessage(jid, content, messageId ? { messageId } : undefined);
+        return sent ?? null;
+    }
+
+    /** Igual que sendText pero sin simular typing — para respuestas automáticas urgentes como el aviso post-rechazo de llamada. */
+    private async sendTextDirect(jid: string, text: string): Promise<WAMessage | null> {
+        if (!this.socket || this.status !== ConnectionStatus.OPEN) {
+            throw new Error(`No conectado a WhatsApp (estado: ${this.status})`);
+        }
+        const content: AnyMessageContent = { text };
+        const sent = await this.socket.sendMessage(jid, content);
         return sent ?? null;
     }
 

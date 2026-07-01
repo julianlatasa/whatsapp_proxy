@@ -17,6 +17,7 @@ export interface LidResolvedPayload {
     lid: string;
 }
 
+
 export interface MessageStatusChangedPayload {
     id: string;
     status: MessageStatus;

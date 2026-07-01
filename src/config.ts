@@ -5,6 +5,7 @@ export interface AppConfig {
     authDir: string;
     browserName: string;
     wsPort: number;
+    callRejectionMessage: string;
 }
 
 function loadConfig(): AppConfig {
@@ -13,6 +14,7 @@ function loadConfig(): AppConfig {
         authDir: process.env.AUTH_DIR ?? './auth_info_baileys',
         browserName: process.env.BROWSER_NAME ?? 'WhatsAppProxy',
         wsPort: Number(process.env.WS_PORT ?? 8081),
+        callRejectionMessage: process.env.CALL_REJECTION_MESSAGE ?? 'Esta línea es solo para mensajes y no admite llamadas.',
     };
 }
 

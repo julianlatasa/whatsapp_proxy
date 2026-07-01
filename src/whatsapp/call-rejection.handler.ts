@@ -1,11 +1,13 @@
 import type { WACallEvent, WASocket } from '@whiskeysockets/baileys';
 
 const CALL_REJECT_DELAY_MS = 2_000;
-const CALL_REJECTION_NOTICE = 'Esta línea es solo para mensajes y no admite llamadas.';
 
 export interface CallRejectionDeps {
     getSocket: () => WASocket | null;
-    sendText: (jid: string, text: string) => Promise<unknown>;
+    /** Envía texto plano sin simular typing, para que el rechazo sea inmediato. */
+    sendTextDirect: (jid: string, text: string) => Promise<unknown>;
+    rejectionMessage: string;
+    onIncomingCall?: (call: WACallEvent) => void;
 }
 
 /**
@@ -21,9 +23,11 @@ export class CallRejectionHandler {
 
     handle(calls: WACallEvent[]): void {
         for (const call of calls) {
-            console.log(`[CallRejectionHandler] Evento de llamada: id=${call.id} from=${call.from} status=${call.status}`);
+            console.log(`[CallRejectionHandler] Evento de llamada: id=${call.id} from=${call.from} status=${call.status} isVideo=${call.isVideo ?? false}`);
 
             if (call.status === 'offer') {
+                this.deps.onIncomingCall?.(call);
+
                 const timer = setTimeout(() => {
                     this.pendingRejections.delete(call.id);
                     void this.reject(call);
@@ -61,8 +65,8 @@ export class CallRejectionHandler {
         try {
             await socket.rejectCall(call.id, call.from);
             console.log(`[CallRejectionHandler] Llamada de ${call.from} rechazada.`);
-            await this.deps.sendText(call.from, CALL_REJECTION_NOTICE);
-            console.log(`[CallRejectionHandler] Aviso de "solo mensajes" enviado a ${call.from}.`);
+            await this.deps.sendTextDirect(call.from, this.deps.rejectionMessage);
+            console.log(`[CallRejectionHandler] Aviso enviado a ${call.from}: "${this.deps.rejectionMessage}"`);
         } catch (error) {
             console.error(`[CallRejectionHandler] No se pudo rechazar/avisar la llamada de ${call.from}:`, error);
         }
