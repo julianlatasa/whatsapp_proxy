@@ -1,6 +1,9 @@
-import type { WACallEvent, WASocket } from '@whiskeysockets/baileys';
+import type { WACallEvent, WACallUpdateType, WASocket } from '@whiskeysockets/baileys';
 
 const CALL_REJECT_DELAY_MS = 2_000;
+
+/** Estados que indican que la llamada ya terminó por cuenta propia — cancelan el rechazo pendiente. */
+const TERMINAL_STATUSES = new Set<WACallUpdateType>(['reject', 'accept', 'terminate', 'timeout']);
 
 export interface CallRejectionDeps {
     getSocket: () => WASocket | null;
@@ -37,12 +40,15 @@ export class CallRejectionHandler {
                 continue;
             }
 
-            // Cualquier otro estado (accept, reject, terminate, ...) para una llamada
-            // que ya tiene un rechazo agendado significa que ya no corresponde rechazarla.
-            const pendingTimer = this.pendingRejections.get(call.id);
-            if (pendingTimer) {
-                clearTimeout(pendingTimer);
-                this.pendingRejections.delete(call.id);
+            // Solo cancela el rechazo si la llamada terminó por sí sola.
+            // Estados intermedios (ringing, preaccept, transport, relaylatency) se ignoran.
+            if (TERMINAL_STATUSES.has(call.status)) {
+                const pendingTimer = this.pendingRejections.get(call.id);
+                if (pendingTimer) {
+                    console.log(`[CallRejectionHandler] Llamada id=${call.id} terminó con status=${call.status} antes del rechazo — timer cancelado.`);
+                    clearTimeout(pendingTimer);
+                    this.pendingRejections.delete(call.id);
+                }
             }
         }
     }
