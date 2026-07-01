@@ -64,6 +64,7 @@ export class WsServer {
             const senderName = status === 'acked' ? rawAck.update.pushName ?? null : null;
 
             if (status === 'acked') {
+                console.log(`[CONTACT][proxy] ✅ WhatsApp ACK recibido — messageId=${targetId} jid=${recipient.jid} lid=${recipient.lid} jidAlt=${jidAlt} pushName=${senderName}`);
                 void this.options.messageRepository.ackOutbound(targetId, rawAck, jidAlt, rawAck.key.remoteJid ?? null);
             }
 
@@ -79,6 +80,7 @@ export class WsServer {
         });
 
         options.client.on('contact.lid-resolved', (mapping) => {
+            console.log(`[CONTACT][proxy] 🔗 contact.lid-resolved — pn=${mapping.pn} lid=${mapping.lid} — enviando push a core`);
             this.pushToActive({
                 type: 'contact.lid-resolved',
                 id: randomUUID(),
@@ -165,7 +167,15 @@ export class WsServer {
         if (!isClientRequestType(frame.type)) return;
         const type = frame.type;
 
+        const isContactOrMessage = type === 'contact.lookup-by-jid' || type === 'contact.lookup-by-lid' || type === 'send.message';
+        if (isContactOrMessage) {
+            console.log(`[CONTACT][proxy] ← Frame recibido de core — type=${type} id=${frame.id} payload=${JSON.stringify(frame.payload)}`);
+        }
+
         void this.handleRequest(socket, type, frame.id, frame.payload as ClientRequestPayloads[typeof type]).catch((error) => {
+            if (isContactOrMessage) {
+                console.error(`[CONTACT][proxy] ❌ Error procesando ${type} id=${frame.id}:`, error);
+            }
             this.send(socket, { type: `${type}.error`, id: frame.id, payload: { message: (error as Error).message } });
         });
     }
@@ -177,6 +187,10 @@ export class WsServer {
         payload: ClientRequestPayloads[T]
     ): Promise<void> {
         const result = await this.dispatch(type, id, payload);
+        const isContactOrMessage = type === 'contact.lookup-by-jid' || type === 'contact.lookup-by-lid' || type === 'send.message';
+        if (isContactOrMessage) {
+            console.log(`[CONTACT][proxy] → Respondiendo ${type}.ok — id=${id} payload=${JSON.stringify(result)}`);
+        }
         this.send(socket, { type: `${type}.ok`, id, payload: result });
     }
 

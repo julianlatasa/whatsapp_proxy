@@ -33,23 +33,33 @@ export class ContactObserver {
             if (rawAck.key.remoteJid && isJidGroup(rawAck.key.remoteJid)) return;
 
             const jidAlt = extractValidJidAlt(rawAck.key, (raw) =>
-                console.log(`[ContactObserver] jidAlt de device específico descartado (contiene ':'): ${raw}`)
+                console.log(`[CONTACT][proxy] jidAlt de device específico descartado (contiene ':'): ${raw}`)
             );
             const remoteJid = rawAck.key.remoteJid ?? null;
             const lidFromAck =
                 (jidAlt && isLidUser(jidAlt) ? jidAlt : null) ??
                 (remoteJid && isLidUser(remoteJid) && !isDeviceSpecificJid(remoteJid) ? remoteJid : null);
 
+            console.log(`[CONTACT][proxy] ACK procesado — messageId=${_targetId} remoteJid=${remoteJid} jidAlt=${jidAlt} lidFromAck=${lidFromAck} recipient.jid=${recipient.jid} recipient.lid=${recipient.lid}`);
+
             if (lidFromAck) {
                 void this.messages.findById(_targetId).then((msg) => {
-                    if (!msg) return;
+                    if (!msg) {
+                        console.log(`[CONTACT][proxy] Mensaje id=${_targetId} no encontrado en repo — no se puede reconciliar jid/lid`);
+                        return;
+                    }
                     const candidates = [msg.remoteJid, msg.remoteJidAlt].filter(
                         (id): id is string => !!id && !!isPnUser(id),
                     );
+                    console.log(`[CONTACT][proxy] Reconciliando lid=${lidFromAck} con pn candidates=${JSON.stringify(candidates)}`);
                     for (const pn of candidates) {
-                        void this.repo.upsertLid(pn, lidFromAck);
+                        void this.repo.upsertLid(pn, lidFromAck).then((updated) => {
+                            console.log(`[CONTACT][proxy] upsertLid(pn=${pn}, lid=${lidFromAck}) → updated=${updated}`);
+                        });
                     }
                 });
+            } else {
+                console.log(`[CONTACT][proxy] ACK sin lid — no se puede reconciliar (messageId=${_targetId})`);
             }
 
             void this.repo.upsert({
