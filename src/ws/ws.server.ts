@@ -95,20 +95,23 @@ export class WsServer {
     }
 
     private onConnection(socket: WebSocket): void {
+        console.log('[ws.server] Cliente conectado.');
         if (this.activeSocket && this.activeSocket.readyState === WebSocket.OPEN) {
+            console.warn('[ws.server] Ya había un cliente activo, se cierra la conexión anterior (replaced).');
             this.activeSocket.close(REPLACED_CONNECTION_CODE, 'replaced by a new connection');
         }
         this.releaseInFlightMessages();
 
         this.activeSocket = socket;
         socket.on('message', (data) => this.onMessage(socket, data));
-        socket.on('close', () => this.onClose(socket));
+        socket.on('close', (code, reason) => this.onClose(socket, code, reason.toString()));
 
         void this.sendInitialState(socket);
     }
 
-    private onClose(socket: WebSocket): void {
+    private onClose(socket: WebSocket, code: number, reason: string): void {
         if (this.activeSocket !== socket) return;
+        console.warn(`[ws.server] Cliente desconectado: code=${code} reason=${reason || 'n/a'}`);
         this.activeSocket = null;
         this.releaseInFlightMessages();
     }
@@ -139,9 +142,24 @@ export class WsServer {
 
     private pushIncomingMessage(message: StoredMessage): void {
         this.ackTracker.track(message.id, () => {
-            void this.options.messageRepository.markPushed(message.id);
-            this.pushToActive({ type: 'message.received', id: message.id, payload: message });
+            void this.pushAttempt(message);
         });
+    }
+
+    /**
+     * Un intento de entrega: cuenta contra `MAX_PUSH_ATTEMPTS` (persistido, ver
+     * `incrementAndCheckPushAttempts`) antes de empujar el frame. El contador sobrevive a
+     * reconexiones del WS, que reinician `ackTracker` pero no deberían resetear cuántas veces ya
+     * se intentó entregar este mensaje puntual.
+     */
+    private async pushAttempt(message: StoredMessage): Promise<void> {
+        const shouldPush = await this.options.messageRepository.incrementAndCheckPushAttempts(message.id);
+        if (!shouldPush) {
+            this.ackTracker.ack(message.id);
+            return;
+        }
+        await this.options.messageRepository.markPushed(message.id);
+        this.pushToActive({ type: 'message.received', id: message.id, payload: message });
     }
 
     private handlePushGiveUp(messageId: string): void {

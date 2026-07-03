@@ -1,6 +1,6 @@
-import { Not, type DataSource, type Repository } from 'typeorm';
+import { In, Not, type DataSource, type Repository } from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity.js';
-import { MessageEntity } from './entities/message.entity.js';
+import { MAX_PUSH_ATTEMPTS, MessageEntity } from './entities/message.entity.js';
 import type { CreateMessageInput, ListMessagesOptions, MessageStatus, StoredMessage } from '../types/message.types.js';
 
 /**
@@ -90,10 +90,14 @@ export class MessageRepository {
         } as QueryDeepPartialEntity<MessageEntity>);
     }
 
-    /** Mensajes entrantes que todavía no fueron confirmados (`acked`) por el WS, en orden de llegada. */
+    /**
+     * Mensajes entrantes que todavía no fueron confirmados (`acked`) por el WS, en orden de
+     * llegada. Excluye `undeliverable`: agotaron `MAX_PUSH_ATTEMPTS` reenvíos y ya no se
+     * reintentan (ver `incrementAndCheckPushAttempts`).
+     */
     async listUnacked(): Promise<StoredMessage[]> {
         return this.repo.find({
-            where: { fromMe: false, status: Not('acked') },
+            where: { fromMe: false, status: Not(In(['acked', 'undeliverable'])) },
             order: { messageTimestamp: 'ASC' },
         });
     }
@@ -101,6 +105,34 @@ export class MessageRepository {
     /** Marca un mensaje entrante como empujado al WS, esperando ack. */
     async markPushed(id: string): Promise<void> {
         await this.updateStatus(id, 'pushed');
+    }
+
+    /**
+     * Incrementa el contador de reenvíos sin ack de un mensaje entrante. Si supera
+     * `MAX_PUSH_ATTEMPTS`, lo marca `undeliverable` (deja de ser candidato en `listUnacked`) y
+     * devuelve `false` para que el llamador no lo vuelva a empujar. Persistido en DB para que el
+     * límite sobreviva a reconexiones del WS, que reinician cualquier contador en memoria.
+     */
+    async incrementAndCheckPushAttempts(id: string): Promise<boolean> {
+        const result = await this.repo
+            .createQueryBuilder()
+            .update(MessageEntity)
+            .set({ pushAttempts: () => 'push_attempts + 1' })
+            .where('id = :id', { id })
+            .execute();
+
+        if (!result.affected) return false;
+
+        const message = await this.findById(id);
+        if (!message) return false;
+
+        if (message.pushAttempts >= MAX_PUSH_ATTEMPTS) {
+            await this.updateStatus(id, 'undeliverable');
+            console.warn(`[MessageRepository] Mensaje id=${id} alcanzó MAX_PUSH_ATTEMPTS=${MAX_PUSH_ATTEMPTS}, marcado undeliverable.`);
+            return false;
+        }
+
+        return true;
     }
 
     /** Confirma que el WS recibió el mensaje. */

@@ -21,8 +21,8 @@ export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
 /** Derivado 1:1 de las columnas de `messages` (ver `storage/entities/message.entity.ts`). */
 export type StoredMessage = MessageEntity;
 
-export type CreateMessageInput = Omit<MessageEntity, 'createdAt' | 'remoteJidAlt' | 'jsonAck'> &
-    Partial<Pick<MessageEntity, 'remoteJidAlt' | 'jsonAck'>>;
+export type CreateMessageInput = Omit<MessageEntity, 'createdAt' | 'remoteJidAlt' | 'jsonAck' | 'pushAttempts'> &
+    Partial<Pick<MessageEntity, 'remoteJidAlt' | 'jsonAck' | 'pushAttempts'>>;
 
 export interface ListMessagesOptions {
     remoteJid?: string;

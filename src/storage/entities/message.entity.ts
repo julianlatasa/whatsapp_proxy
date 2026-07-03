@@ -18,7 +18,10 @@ export const MESSAGE_TYPES = [
     'unknown',
 ] as const;
 
-export const MESSAGE_STATUSES = ['pending', 'sent', 'received', 'pushed', 'acked'] as const;
+export const MESSAGE_STATUSES = ['pending', 'sent', 'received', 'pushed', 'acked', 'undeliverable'] as const;
+
+/** Tope de reenvíos de un mensaje entrante sin ack antes de marcarlo `undeliverable` y dejar de reintentarlo. */
+export const MAX_PUSH_ATTEMPTS = 10;
 
 const EPOCH_MS_DEFAULT = "(unixepoch('now','subsec') * 1000)";
 
@@ -81,6 +84,10 @@ export class MessageEntity {
 
     @Column({ name: 'status_timestamp', type: 'integer', default: () => EPOCH_MS_DEFAULT })
     statusTimestamp!: number;
+
+    /** Cantidad de veces que se empujó este mensaje entrante al WS sin recibir ack. Ver `MAX_PUSH_ATTEMPTS`. */
+    @Column({ name: 'push_attempts', type: 'integer', default: 0 })
+    pushAttempts!: number;
 
     @Column({ name: 'created_at', type: 'integer', default: () => EPOCH_MS_DEFAULT })
     createdAt!: number;
