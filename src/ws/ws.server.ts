@@ -183,6 +183,11 @@ export class WsServer {
             return;
         }
 
+        if (frame.type === 'ping') {
+            this.send(socket, { type: 'pong', id: frame.id, payload: null });
+            return;
+        }
+
         if (!isClientRequestType(frame.type)) return;
         const type = frame.type;
 
