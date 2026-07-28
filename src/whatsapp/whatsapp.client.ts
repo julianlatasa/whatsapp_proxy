@@ -234,6 +234,7 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
 
         if (qr) {
             this.lastQr = qr;
+            this.emit('qr', qr);
         }
 
         if (connection === 'close') {
