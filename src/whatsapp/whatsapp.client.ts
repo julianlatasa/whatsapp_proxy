@@ -3,6 +3,7 @@ import makeWASocket, {
     type BaileysEventMap,
     type Contact,
     DisconnectReason,
+    fetchLatestBaileysVersion,
     jidNormalizedUser,
     type LIDMapping,
     proto,
@@ -209,9 +210,11 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
         this.detachListeners();
 
         const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
+        const { version } = await fetchLatestBaileysVersion();
 
         this.socket = makeWASocket({
             auth: state,
+            version,
             browser: [this.browserName, 'Chrome', '1.0.0'],
             syncFullHistory: false,
             keepAliveIntervalMs: KEEP_ALIVE_INTERVAL_MS,
