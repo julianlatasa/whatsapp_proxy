@@ -1,3 +1,4 @@
+import qrcodeTerminal from 'qrcode-terminal';
 import type { WhatsAppClient } from '../whatsapp/whatsapp.client.js';
 
 /**
@@ -11,8 +12,9 @@ export class ConsoleLoggerObserver {
             console.log(`[ConsoleLogger] Estado de conexión: ${status}`);
         });
 
-        client.on('qr', () => {
-            console.log('[ConsoleLogger] Nuevo QR disponible.');
+        client.on('qr', (qr) => {
+            console.log('[ConsoleLogger] Nuevo QR disponible, escaneá desde WhatsApp > Dispositivos vinculados:');
+            qrcodeTerminal.generate(qr, { small: true });
         });
 
         client.on('message.received', (message) => {

@@ -78,6 +78,8 @@ const baileysLogger = pino({ level: process.env.BAILEYS_LOG_LEVEL ?? 'warn' });
 const COMPOSING_DELAY_MS = 1_200;
 /** Baileys envía un ping al servidor cada `keepAliveIntervalMs` para mantener la conexión activa; si no hay respuesta en ese intervalo + 5s, fuerza una reconexión (manejada en `onConnectionUpdate`). */
 const KEEP_ALIVE_INTERVAL_MS = 30_000;
+/** Mínimo tiempo entre dos inicios de socket sin sesión abierta (cada uno puede disparar un QR nuevo); evita spamear al servidor de pedidos de QR y arriesgar un ban. */
+const MIN_QR_REQUEST_INTERVAL_MS = 30_000;
 
 /** Mapea el ack numérico de WhatsApp a los estados que modelamos (sin `read`/`played`). */
 const ACK_STATUS_MAP: Partial<Record<proto.WebMessageInfo.Status, MessageStatus>> = {
@@ -104,6 +106,7 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
     private socket: WASocket | null = null;
     private status: ConnectionStatus = ConnectionStatus.IDLE;
     private lastQr: string | null = null;
+    private lastQrRequestAt: number | null = null;
 
     constructor(options: WhatsAppClientOptions = {}) {
         super();
@@ -145,7 +148,7 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
         await this.socket.logout().catch(() => undefined);
     }
 
-    /** Cancela el backoff de reconexión pendiente y reinicia el socket ya, para forzar un QR nuevo sin esperar. No hace nada si ya hay una sesión abierta. */
+    /** Cancela el backoff de reconexión pendiente y reinicia el socket para forzar un QR nuevo (sujeto al throttle de `MIN_QR_REQUEST_INTERVAL_MS`, ver `waitForQrThrottle`). No hace nada si ya hay una sesión abierta. */
     async requestFreshQr(): Promise<void> {
         if (this.status === ConnectionStatus.OPEN) return;
         this.reconnectScheduler.reset();
@@ -206,8 +209,21 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
         }
     }
 
+    /** Si el último intento de conexión pidió un QR, espera lo que falte hasta completar `MIN_QR_REQUEST_INTERVAL_MS` antes de abrir un socket nuevo (que podría disparar otro QR). */
+    private async waitForQrThrottle(): Promise<void> {
+        if (this.lastQrRequestAt == null) return;
+
+        const elapsed = Date.now() - this.lastQrRequestAt;
+        const remaining = MIN_QR_REQUEST_INTERVAL_MS - elapsed;
+        if (remaining <= 0) return;
+
+        console.log(`[WhatsAppClient] Throttle de QR: esperando ${remaining}ms antes de pedir un QR nuevo.`);
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+    }
+
     private async initSocket(): Promise<void> {
         this.detachListeners();
+        await this.waitForQrThrottle();
 
         const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
         const { version } = await fetchLatestBaileysVersion();
@@ -237,6 +253,7 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
 
         if (qr) {
             this.lastQr = qr;
+            this.lastQrRequestAt = Date.now();
             this.emit('qr', qr);
         }
 
@@ -262,6 +279,7 @@ export class WhatsAppClient extends TypedEventEmitter<WhatsAppClientEvents> {
 
         if (connection === 'open') {
             this.lastQr = null;
+            this.lastQrRequestAt = null;
             this.reconnectScheduler.reset();
             this.setStatus(ConnectionStatus.OPEN);
         }
